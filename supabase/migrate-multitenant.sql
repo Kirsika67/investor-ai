@@ -1,25 +1,19 @@
--- Käivita see Supabase projektis: SQL Editor > New query > kleebi ja käivita
--- Multi-user: iga rida on seotud auth.users.id-ga; RLS blokeerib teiste andmed.
+-- Käivita olemasolevas V1 projektis (kui tabelid juba olemas ilma user_id-ta).
+-- HOIATUS: vanad jagatud read kustutatakse, sest neil pole omanikku.
 
-create extension if not exists "pgcrypto";
+-- 1) Lisa user_id veerud (kui puuduvad)
+alter table watchlist_items add column if not exists user_id uuid references auth.users(id) on delete cascade;
+alter table holdings add column if not exists user_id uuid references auth.users(id) on delete cascade;
 
-create table if not exists watchlist_items (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  symbol text not null,
-  note text,
-  created_at timestamp with time zone default now()
-);
+-- 2) Eemalda vanad jagatud / omanikuta read
+delete from watchlist_items where user_id is null;
+delete from holdings where user_id is null;
 
-create table if not exists holdings (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references auth.users(id) on delete cascade,
-  symbol text not null,
-  shares numeric not null,
-  cost_basis numeric not null,
-  created_at timestamp with time zone default now()
-);
+-- 3) Muuda user_id kohustuslikuks
+alter table watchlist_items alter column user_id set not null;
+alter table holdings alter column user_id set not null;
 
+-- 4) Chat / project tabelid
 create table if not exists ai_chats (
   id text primary key,
   user_id uuid not null references auth.users(id) on delete cascade,

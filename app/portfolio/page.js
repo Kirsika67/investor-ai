@@ -2,9 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Nav from '../Nav';
+import AuthGate from '../AuthGate';
 import { supabase } from '../../lib/supabaseClient';
+import { useAuth } from '../../lib/AuthProvider';
 
 export default function PortfolioPage() {
+  const { user } = useAuth();
+  const userId = user?.id;
   const [holdings, setHoldings] = useState([]);
   const [symbol, setSymbol] = useState('');
   const [shares, setShares] = useState('');
@@ -13,14 +17,16 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!userId) return;
     loadHoldings();
-  }, []);
+  }, [userId]);
 
   async function loadHoldings() {
     setLoading(true);
     const { data, error: dbError } = await supabase
       .from('holdings')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: true });
 
     if (dbError) {
@@ -51,6 +57,11 @@ export default function PortfolioPage() {
     const costNum = parseFloat(cost);
     setError('');
 
+    if (!userId) {
+      setError('Pead olema sisse logitud.');
+      return;
+    }
+
     if (!sym || isNaN(sharesNum) || isNaN(costNum) || sharesNum <= 0 || costNum <= 0) {
       setError('Täida sümbol, kogus ja ostuhind korrektselt.');
       return;
@@ -58,7 +69,7 @@ export default function PortfolioPage() {
 
     const { error: dbError } = await supabase
       .from('holdings')
-      .insert({ symbol: sym, shares: sharesNum, cost_basis: costNum });
+      .insert({ symbol: sym, shares: sharesNum, cost_basis: costNum, user_id: userId });
 
     if (dbError) {
       setError('Lisamine ebaõnnestus: ' + dbError.message);
@@ -70,7 +81,7 @@ export default function PortfolioPage() {
   }
 
   async function removeHolding(id) {
-    await supabase.from('holdings').delete().eq('id', id);
+    await supabase.from('holdings').delete().eq('id', id).eq('user_id', userId);
     loadHoldings();
   }
 
@@ -82,6 +93,7 @@ export default function PortfolioPage() {
   const plUp = totalPl >= 0;
 
   return (
+    <AuthGate>
     <div>
       <Nav active="portfolio" />
       <div className="page">
@@ -161,5 +173,6 @@ export default function PortfolioPage() {
         </table>
       </div>
     </div>
+    </AuthGate>
   );
 }

@@ -1,13 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../lib/AuthProvider';
 
-const CHATS_KEY = 'investor-ai-chats-v1';
-const PROJECTS_KEY = 'investor-ai-projects-v1';
-const MODELS = ['Sonnet 5 Medium', 'Sonnet 5 High', 'Haiku 4.5'];
+const MODELS = ['Analüüs Deep', 'Analüüs Fast', 'Brief'];
+const MOBILE_MQ = '(max-width: 720px)';
 
 function uid(prefix = 'c') {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function storageKey(userId, kind) {
+  return `investor-ai-${kind}-v2:${userId}`;
 }
 
 function loadJson(key, fallback) {
@@ -22,6 +27,31 @@ function loadJson(key, fallback) {
 
 function saveJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function emptyChat() {
+  return { id: uid(), title: 'Uus vestlus', messages: [], updatedAt: Date.now(), pinned: false };
+}
+
+function rowToChat(row) {
+  return {
+    id: row.id,
+    title: row.title || 'Uus vestlus',
+    messages: Array.isArray(row.messages) ? row.messages : [],
+    updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
+    pinned: Boolean(row.pinned),
+  };
+}
+
+function chatToRow(chat, userId) {
+  return {
+    id: chat.id,
+    user_id: userId,
+    title: chat.title || 'Uus vestlus',
+    messages: chat.messages || [],
+    pinned: Boolean(chat.pinned),
+    updated_at: new Date(chat.updatedAt || Date.now()).toISOString(),
+  };
 }
 
 function titleFromMessages(messages) {
@@ -201,7 +231,18 @@ function IconLeaf() {
   );
 }
 
+function IconMenu() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function ClaudeChat({ context, onBack }) {
+  const { user, displayName, avatarLetter, isPro, signOut } = useAuth();
+  const userId = user?.id;
+
   const [chats, setChats] = useState([]);
   const [projects, setProjects] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -209,6 +250,7 @@ export default function ClaudeChat({ context, onBack }) {
   const [busy, setBusy] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [productTab, setProductTab] = useState('chat'); // chat | cowork | code
   const [sideView, setSideView] = useState('chats'); // chats | projects | artifacts | customize
   const [model, setModel] = useState(MODELS[0]);
@@ -229,6 +271,21 @@ export default function ClaudeChat({ context, onBack }) {
   const mediaRecorderRef = useRef(null);
   const chunksRef = useRef([]);
   const useWhisperRef = useRef(false);
+  const persistTimerRef = useRef(null);
+  const knownChatIdsRef = useRef(new Set());
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const mq = window.matchMedia(MOBILE_MQ);
+    const apply = () => {
+      const mobile = mq.matches;
+      setIsMobile(mobile);
+      if (mobile) setSideCollapsed(true);
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -245,6 +302,7 @@ export default function ClaudeChat({ context, onBack }) {
         // ignore
       }
       micStreamRef.current?.getTracks?.().forEach((t) => t.stop());
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     };
   }, []);
 
@@ -539,33 +597,120 @@ export default function ClaudeChat({ context, onBack }) {
   }
 
   useEffect(() => {
-    const existing = loadJson(CHATS_KEY, []);
-    const existingProjects = loadJson(PROJECTS_KEY, []);
-    setProjects(Array.isArray(existingProjects) ? existingProjects : []);
+    if (!userId) return undefined;
+    let cancelled = false;
+    setHydrated(false);
 
-    if (Array.isArray(existing) && existing.length) {
-      const sorted = [...existing].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    async function hydrate() {
+      const chatsKey = storageKey(userId, 'chats');
+      const projectsKey = storageKey(userId, 'projects');
+
+      // Server (RLS) is source of truth; local cache is per-user fallback only.
+      let nextChats = [];
+      let nextProjects = [];
+
+      const { data: chatRows, error: chatErr } = await supabase
+        .from('ai_chats')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
+
+      if (!cancelled && !chatErr && Array.isArray(chatRows) && chatRows.length) {
+        nextChats = chatRows.map(rowToChat);
+      } else {
+        const cached = loadJson(chatsKey, []);
+        if (Array.isArray(cached) && cached.length) nextChats = cached;
+      }
+
+      const { data: projectRows, error: projectErr } = await supabase
+        .from('ai_projects')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (!cancelled && !projectErr && Array.isArray(projectRows)) {
+        nextProjects = projectRows.map((p) => ({ id: p.id, name: p.name }));
+      } else {
+        const cached = loadJson(projectsKey, []);
+        if (Array.isArray(cached)) nextProjects = cached;
+      }
+
+      if (cancelled) return;
+
+      if (!nextChats.length) {
+        nextChats = [emptyChat()];
+      }
+
+      const sorted = [...nextChats].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      knownChatIdsRef.current = new Set(sorted.map((c) => c.id));
       setChats(sorted);
       setActiveId(sorted[0].id);
-    } else {
-      const id = uid();
-      const fresh = [{ id, title: 'Uus vestlus', messages: [], updatedAt: Date.now(), pinned: false }];
-      setChats(fresh);
-      setActiveId(id);
-      saveJson(CHATS_KEY, fresh);
+      setProjects(nextProjects);
+      saveJson(chatsKey, sorted);
+      saveJson(projectsKey, nextProjects);
+      setHydrated(true);
     }
-    setHydrated(true);
-  }, []);
+
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    saveJson(CHATS_KEY, chats);
-  }, [chats, hydrated]);
+    if (!hydrated || !userId) return;
+    const chatsKey = storageKey(userId, 'chats');
+    saveJson(chatsKey, chats);
+
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(async () => {
+      const rows = chats.map((c) => chatToRow(c, userId));
+      const currentIds = new Set(chats.map((c) => c.id));
+      const removed = [...knownChatIdsRef.current].filter((id) => !currentIds.has(id));
+
+      if (rows.length) {
+        await supabase.from('ai_chats').upsert(rows, { onConflict: 'id' });
+      }
+      if (removed.length) {
+        await supabase.from('ai_chats').delete().eq('user_id', userId).in('id', removed);
+      }
+      knownChatIdsRef.current = currentIds;
+    }, 450);
+
+    return () => {
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    };
+  }, [chats, hydrated, userId]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    saveJson(PROJECTS_KEY, projects);
-  }, [projects, hydrated]);
+    if (!hydrated || !userId) return;
+    const projectsKey = storageKey(userId, 'projects');
+    saveJson(projectsKey, projects);
+
+    const sync = async () => {
+      const rows = projects.map((p) => ({
+        id: p.id,
+        user_id: userId,
+        name: p.name,
+      }));
+      if (rows.length) {
+        await supabase.from('ai_projects').upsert(rows, { onConflict: 'id' });
+      }
+    };
+    sync();
+  }, [projects, hydrated, userId]);
+
+  function closeMobileSide() {
+    if (isMobile) setSideCollapsed(true);
+  }
+
+  function openSide() {
+    setSideCollapsed(false);
+  }
+
+  function toggleSide() {
+    setSideCollapsed((v) => !v);
+  }
 
   const active = useMemo(
     () => chats.find((c) => c.id === activeId) || chats[0] || null,
@@ -600,6 +745,7 @@ export default function ClaudeChat({ context, onBack }) {
     setInput('');
     setProductTab('chat');
     setSideView('chats');
+    closeMobileSide();
     setTimeout(() => inputRef.current?.focus(), 40);
   }
 
@@ -609,6 +755,7 @@ export default function ClaudeChat({ context, onBack }) {
     setActiveId(id);
     setProductTab('chat');
     setSideView('chats');
+    closeMobileSide();
     setTimeout(() => inputRef.current?.focus(), 40);
   }
 
@@ -786,26 +933,45 @@ export default function ClaudeChat({ context, onBack }) {
   }
 
   return (
-    <div className={`claude-app ${sideCollapsed ? 'side-collapsed' : ''}`}>
+    <div
+      className={`claude-app ${sideCollapsed ? 'side-collapsed' : 'side-open'} ${isMobile ? 'is-mobile' : ''}`}
+    >
       <header className="claude-topbar">
-        <nav className="claude-product-tabs">
-          <button
-            type="button"
-            className={productTab === 'chat' ? 'active' : ''}
-            onClick={() => {
-              setProductTab('chat');
-              setSideView('chats');
-            }}
-          >
-            Chat
-          </button>
-          <button type="button" className={productTab === 'cowork' ? 'active' : ''} onClick={() => setProductTab('cowork')}>
-            Cowork
-          </button>
-          <button type="button" className={productTab === 'code' ? 'active' : ''} onClick={() => setProductTab('code')}>
-            Code
-          </button>
-        </nav>
+        <div className="claude-topbar-left">
+          {(isMobile || sideCollapsed) && (
+            <button
+              type="button"
+              className="claude-menu-btn"
+              onClick={toggleSide}
+              title={sideCollapsed ? 'Ava menüü' : 'Sulge menüü'}
+              aria-label={sideCollapsed ? 'Ava menüü' : 'Sulge menüü'}
+            >
+              <IconMenu />
+            </button>
+          )}
+          <div className="claude-brand">
+            <span className="claude-brand-mark">Investor AI</span>
+            <span className="claude-brand-sub">Research</span>
+          </div>
+          <nav className="claude-product-tabs">
+            <button
+              type="button"
+              className={productTab === 'chat' ? 'active' : ''}
+              onClick={() => {
+                setProductTab('chat');
+                setSideView('chats');
+              }}
+            >
+              Vestlus
+            </button>
+            <button type="button" className={productTab === 'cowork' ? 'active' : ''} onClick={() => setProductTab('cowork')}>
+              Tööruum
+            </button>
+            <button type="button" className={productTab === 'code' ? 'active' : ''} onClick={() => setProductTab('code')}>
+              Tööriistad
+            </button>
+          </nav>
+        </div>
         {onBack && (
           <button type="button" className="claude-top-back" onClick={onBack}>
             ← Markets
@@ -814,10 +980,18 @@ export default function ClaudeChat({ context, onBack }) {
       </header>
 
       <div className="claude-shell">
+        {isMobile && !sideCollapsed && (
+          <button type="button" className="claude-side-backdrop" aria-label="Sulge menüü" onClick={closeMobileSide} />
+        )}
+
         {!sideCollapsed && (
           <aside className="claude-side">
-            <button type="button" className="claude-new" onClick={newChat}>
-              <IconPlus /> New chat
+            <button
+              type="button"
+              className="claude-new"
+              onClick={newChat}
+            >
+              <IconPlus /> Uus vestlus
             </button>
 
             <nav className="claude-side-nav">
@@ -826,21 +1000,21 @@ export default function ClaudeChat({ context, onBack }) {
                 className={sideView === 'projects' ? 'active' : ''}
                 onClick={() => setSideView('projects')}
               >
-                <IconFolder /> Projects
+                <IconFolder /> Kaustad
               </button>
               <button
                 type="button"
                 className={sideView === 'artifacts' ? 'active' : ''}
                 onClick={() => setSideView('artifacts')}
               >
-                <IconArtifacts /> Artifacts
+                <IconArtifacts /> Märkmed
               </button>
               <button
                 type="button"
                 className={sideView === 'customize' ? 'active' : ''}
                 onClick={() => setSideView('customize')}
               >
-                <IconSliders /> Customize
+                <IconSliders /> Seaded
               </button>
             </nav>
 
@@ -849,7 +1023,7 @@ export default function ClaudeChat({ context, onBack }) {
                 <>
                   {pinned.length > 0 && (
                     <>
-                      <div className="claude-side-label">Pinned</div>
+                      <div className="claude-side-label">Kinnistatud</div>
                       <div className="claude-recents">
                         {pinned.map((c) => (
                           <ChatRow key={c.id} c={c} />
@@ -857,7 +1031,7 @@ export default function ClaudeChat({ context, onBack }) {
                       </div>
                     </>
                   )}
-                  <div className="claude-side-label">Recents</div>
+                  <div className="claude-side-label">Hiljutised</div>
                   <div className="claude-recents">
                     {recents.map((c) => (
                       <ChatRow key={c.id} c={c} />
@@ -868,11 +1042,11 @@ export default function ClaudeChat({ context, onBack }) {
 
               {sideView === 'projects' && (
                 <div className="claude-panel-block">
-                  <div className="claude-side-label">Projects</div>
+                  <div className="claude-side-label">Kaustad</div>
                   <button type="button" className="claude-inline-btn" onClick={createProject}>
-                    + New project
+                    + Uus kaust
                   </button>
-                  {projects.length === 0 && <p className="claude-side-empty">Pole veel projekte.</p>}
+                  {projects.length === 0 && <p className="claude-side-empty">Pole veel kaustu.</p>}
                   {projects.map((p) => (
                     <div key={p.id} className="claude-project-row">
                       <IconFolder />
@@ -884,16 +1058,16 @@ export default function ClaudeChat({ context, onBack }) {
 
               {sideView === 'artifacts' && (
                 <div className="claude-panel-block">
-                  <div className="claude-side-label">Artifacts</div>
-                  <p className="claude-side-empty">Artifacts ilmuvad siia, kui AI loob faile või koodi.</p>
+                  <div className="claude-side-label">Märkmed</div>
+                  <p className="claude-side-empty">Siia tulevad salvestatud analüüsimärkmed.</p>
                 </div>
               )}
 
               {sideView === 'customize' && (
                 <div className="claude-panel-block">
-                  <div className="claude-side-label">Customize</div>
+                  <div className="claude-side-label">Seaded</div>
                   <p className="claude-side-empty">
-                    Teemat ei pea ette valima — kirjuta lihtsalt küsimus. AI tuvastab teema vestlusest.
+                    Teemat ei pea ette valima — kirjuta nt „Analüüsi AMD”. AI arvutab P/E ja tippinvestorite filtrid.
                   </p>
                 </div>
               )}
@@ -903,16 +1077,16 @@ export default function ClaudeChat({ context, onBack }) {
               <div className="claude-update-card">
                 <IconLeaf />
                 <div>
-                  <div className="claude-update-title">Relaunch to update</div>
-                  <div className="claude-update-ver">v1.24012.9</div>
+                  <div className="claude-update-title">Sinu Investor AI</div>
+                  <div className="claude-update-ver">Isiklikud vestlused</div>
                 </div>
               </div>
 
               <div className="claude-profile">
-                <div className="claude-avatar">K</div>
+                <div className="claude-avatar">{avatarLetter}</div>
                 <div className="claude-profile-meta">
-                  <span className="claude-profile-name">Kirsika</span>
-                  <span className="claude-pro">Pro</span>
+                  <span className="claude-profile-name">{displayName}</span>
+                  {isPro && <span className="claude-pro">Pro</span>}
                 </div>
                 <div className="claude-profile-actions">
                   <button
@@ -923,14 +1097,16 @@ export default function ClaudeChat({ context, onBack }) {
                   >
                     ⋯
                   </button>
-                  <button
-                    type="button"
-                    className="claude-icon-btn"
-                    onClick={() => setSideCollapsed(true)}
-                    title="Peida külgriba"
-                  >
-                    <IconCollapse />
-                  </button>
+                  {!isMobile && (
+                    <button
+                      type="button"
+                      className="claude-icon-btn"
+                      onClick={() => setSideCollapsed(true)}
+                      title="Peida külgriba"
+                    >
+                      <IconCollapse />
+                    </button>
+                  )}
                 </div>
                 {menuOpen && (
                   <div className="claude-profile-menu">
@@ -948,6 +1124,15 @@ export default function ClaudeChat({ context, onBack }) {
                     <button type="button" onClick={() => { setMenuOpen(false); setSideView('customize'); }}>
                       Settings
                     </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setMenuOpen(false);
+                        await signOut();
+                      }}
+                    >
+                      Logi välja
+                    </button>
                   </div>
                 )}
               </div>
@@ -955,8 +1140,8 @@ export default function ClaudeChat({ context, onBack }) {
           </aside>
         )}
 
-        {sideCollapsed && (
-          <button type="button" className="claude-expand" onClick={() => setSideCollapsed(false)} title="Ava külgriba">
+        {!isMobile && sideCollapsed && (
+          <button type="button" className="claude-expand" onClick={openSide} title="Ava külgriba">
             ›
           </button>
         )}
@@ -964,20 +1149,20 @@ export default function ClaudeChat({ context, onBack }) {
         <main className="claude-main">
           {productTab === 'cowork' && (
             <div className="claude-mode-page">
-              <h2>Cowork</h2>
-              <p>Tööta Investor AI-ga koos projektide ja failide kallal — nagu Claude Cowork.</p>
+              <h2>Tööruum</h2>
+              <p>Hoia analüüside kaustu ja märkmeid Investor AI-s — eraldi vestlustest.</p>
               <button type="button" className="claude-inline-btn" onClick={() => setSideView('projects')}>
-                Ava Projects
+                Ava kaustad
               </button>
             </div>
           )}
 
           {productTab === 'code' && (
             <div className="claude-mode-page">
-              <h2>Code</h2>
-              <p>Küsi investeerimisloogika, skriptide või andmeanalüüsi kohta. Ava Chat, et alustada.</p>
+              <h2>Tööriistad</h2>
+              <p>Küsi valuatsiooni, P/E/PEG arvutusi või portfelli loogikat. Ava Vestlus, et alustada.</p>
               <button type="button" className="claude-inline-btn" onClick={() => setProductTab('chat')}>
-                Mine Chati
+                Mine vestlusse
               </button>
             </div>
           )}
@@ -988,9 +1173,10 @@ export default function ClaudeChat({ context, onBack }) {
                 {active.messages.length === 0 && !busy && (
                   <div className="claude-empty">
                     <div className="claude-asterisk" aria-hidden>
-                      ✦
+                      IA
                     </div>
-                    <h2>Kuidas saan aidata?</h2>
+                    <h2>Mis aktsiat analüüsime?</h2>
+                    <p className="claude-empty-hint">Nt „Analüüsi AMD” — arvutan P/E, PEG ja õiglase hinna.</p>
                   </div>
                 )}
 
@@ -998,7 +1184,7 @@ export default function ClaudeChat({ context, onBack }) {
                   <div key={i} className={`claude-msg ${m.role}`}>
                     {m.role === 'assistant' && (
                       <div className="claude-msg-icon" aria-hidden>
-                        ✦
+                        IA
                       </div>
                     )}
                     <div className="claude-msg-content">
@@ -1081,10 +1267,10 @@ export default function ClaudeChat({ context, onBack }) {
                 {busy && (
                   <div className="claude-msg assistant">
                     <div className="claude-msg-icon claude-spin" aria-hidden>
-                      ✦
+                      IA
                     </div>
                     <div className="claude-msg-content">
-                      <div className="claude-msg-body claude-thinking">Mõtlen…</div>
+                      <div className="claude-msg-body claude-thinking">Arvutan valuatsiooni…</div>
                     </div>
                   </div>
                 )}
@@ -1097,7 +1283,7 @@ export default function ClaudeChat({ context, onBack }) {
                     <button type="button" className="claude-composer-icon" title="Lisa">
                       <IconPlus />
                     </button>
-                    <button type="button" className="claude-composer-icon" title="Artifacts">
+                    <button type="button" className="claude-composer-icon" title="Manus">
                       <IconPaperclip />
                     </button>
                   </div>
@@ -1105,7 +1291,7 @@ export default function ClaudeChat({ context, onBack }) {
                     ref={inputRef}
                     value={input}
                     rows={1}
-                    placeholder="Type"
+                    placeholder="Analüüsi AMD…"
                     onChange={(e) => {
                       setInput(e.target.value);
                       const el = e.target;
@@ -1175,7 +1361,7 @@ export default function ClaudeChat({ context, onBack }) {
                 </div>
                 {micStatus && !micError && <div className="claude-mic-status">{micStatus}</div>}
                 {micError && <div className="claude-mic-error">{micError}</div>}
-                <div className="claude-disclaimer">Claude is AI and can make mistakes. Please double-check responses.</div>
+                <div className="claude-disclaimer">Investor AI arvutab valuatsiooni; see ei ole isiklik soovitus. Kontrolli numbreid.</div>
               </div>
             </>
           )}

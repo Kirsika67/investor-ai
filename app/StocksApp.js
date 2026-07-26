@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../lib/AuthProvider';
+import AuthGate from './AuthGate';
 import ClaudeChat from './ClaudeChat';
 
 const DEFAULT_SYMBOLS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'VOO', 'QQQ', 'SPY'];
@@ -193,11 +195,16 @@ function PriceChart({ points, up }) {
 }
 
 export default function StocksApp() {
+  const { user, displayName, signOut } = useAuth();
+  const userId = user?.id;
+
   const [rows, setRows] = useState([]);
   const [quotes, setQuotes] = useState({});
   const [selected, setSelected] = useState('AAPL');
   const [range, setRange] = useState('1D');
   const [chart, setChart] = useState(null);
+  const [analysis, setAnalysis] = useState(null);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
   const [symbolNews, setSymbolNews] = useState([]);
   const [hotNews, setHotNews] = useState([]);
   const [newsTopic, setNewsTopic] = useState('top');
@@ -259,11 +266,13 @@ export default function StocksApp() {
   }, []);
 
   const loadWatchlist = useCallback(async () => {
+    if (!userId) return;
     setLoadingList(true);
     setError('');
     let { data, error: dbError } = await supabase
       .from('watchlist_items')
       .select('*')
+      .eq('user_id', userId)
       .order('created_at', { ascending: true });
 
     if (dbError) {
@@ -272,8 +281,12 @@ export default function StocksApp() {
     }
 
     if (!data?.length) {
-      await supabase.from('watchlist_items').insert(DEFAULT_SYMBOLS.map((symbol) => ({ symbol })));
-      const again = await supabase.from('watchlist_items').select('*').order('created_at', { ascending: true });
+      await supabase.from('watchlist_items').insert(DEFAULT_SYMBOLS.map((symbol) => ({ symbol, user_id: userId })));
+      const again = await supabase
+        .from('watchlist_items')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
       data = again.data || DEFAULT_SYMBOLS.map((symbol) => ({ id: `local-${symbol}`, symbol }));
     }
 
@@ -304,15 +317,16 @@ export default function StocksApp() {
         // ignore
       }
     }
-  }, []);
+  }, [userId]);
 
   useEffect(() => {
+    if (!userId) return;
     loadWatchlist();
     if (typeof window !== 'undefined') {
       const hash = window.location.hash.replace('#', '');
       if (hash === 'trends' || hash === 'news' || hash === 'ai') setTopTab(hash);
     }
-  }, []);
+  }, [userId, loadWatchlist]);
 
   // Automaatne värske info iga 90s (ainult valitud + watchlist hinnad rahulikult)
   useEffect(() => {
@@ -388,6 +402,28 @@ export default function StocksApp() {
       cancelled = true;
     };
   }, [selected, range]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAnalysis() {
+      if (!selected) return;
+      setAnalysisLoading(true);
+      setAnalysis(null);
+      try {
+        const res = await fetch(`/api/analyze?symbol=${encodeURIComponent(selected)}`);
+        const json = await res.json();
+        if (!cancelled && !json.error) setAnalysis(json);
+        else if (!cancelled && json.error) setAnalysis({ error: json.error });
+      } catch (e) {
+        if (!cancelled) setAnalysis({ error: e.message });
+      }
+      if (!cancelled) setAnalysisLoading(false);
+    }
+    loadAnalysis();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   useEffect(() => {
     let cancelled = false;
@@ -596,7 +632,7 @@ export default function StocksApp() {
 
   async function addToWatchlist(symbol) {
     const sym = String(symbol || selected || '').trim().toUpperCase();
-    if (!sym || adding) return;
+    if (!sym || adding || !userId) return;
     if (rows.some((r) => r.symbol === sym)) {
       setFlash(`${sym} on juba watchlistis`);
       setTimeout(() => setFlash(''), 2000);
@@ -611,7 +647,7 @@ export default function StocksApp() {
 
     const { data, error: dbError } = await supabase
       .from('watchlist_items')
-      .insert({ symbol: sym })
+      .insert({ symbol: sym, user_id: userId })
       .select()
       .single();
 
@@ -646,7 +682,7 @@ export default function StocksApp() {
     setFlash(`Eemaldatud watchlistist: ${sym}`);
     setTimeout(() => setFlash(''), 2000);
     if (!String(row.id).startsWith('local-') && !String(row.id).startsWith('temp-')) {
-      await supabase.from('watchlist_items').delete().eq('id', row.id);
+      await supabase.from('watchlist_items').delete().eq('id', row.id).eq('user_id', userId);
     }
   }
 
@@ -733,6 +769,7 @@ export default function StocksApp() {
   );
 
   return (
+    <AuthGate>
     <div className={`stocks-shell ${topTab === 'ai' ? 'ai-mode' : ''}`}>
       {topTab !== 'ai' && (
         <header className="stocks-topnav">
@@ -770,6 +807,12 @@ export default function StocksApp() {
               AI vestlus
             </button>
           </nav>
+          <div className="topnav-user">
+            <span className="topnav-user-name">{displayName}</span>
+            <button type="button" className="topnav-signout" onClick={() => signOut()}>
+              Logi välja
+            </button>
+          </div>
         </header>
       )}
 
@@ -961,6 +1004,75 @@ export default function StocksApp() {
                 {chart?.updatedAt && (
                   <div className="freshness">Uuendatud {new Date(chart.updatedAt).toLocaleTimeString('et-EE')}</div>
                 )}
+
+                <section className="valuation-section" aria-label="Valuatsioon">
+                  <h3 className="panel-title">Kas on mõistlik?</h3>
+                  {analysisLoading && <p className="muted">Arvutan valuatsiooni…</p>}
+                  {!analysisLoading && analysis?.error && (
+                    <p className="muted">Analüüsi ei saanud: {analysis.error}</p>
+                  )}
+                  {!analysisLoading && analysis?.valuation && (() => {
+                    const v = analysis.valuation;
+                    const m = analysis.metrics || {};
+                    const labelClass =
+                      v.label === 'cheap' ? 'cheap' : v.label === 'expensive' ? 'expensive' : v.label === 'fair' ? 'label-fair' : 'unknown';
+                    return (
+                      <>
+                        <div className={`valuation-verdict valuation-${labelClass}`}>
+                          <div className="valuation-verdict-main">
+                            <span className="valuation-label">{v.labelEt}</span>
+                            {v.score != null && (
+                              <span className="valuation-score mono">{v.score}<small>/100</small></span>
+                            )}
+                          </div>
+                          <div className="valuation-range">
+                            {v.fairLow != null && v.fairHigh != null ? (
+                              <>
+                                <span>Õiglane hind</span>
+                                <b className="mono">
+                                  ${fmtPrice(v.fairLow)} – ${fmtPrice(v.fairHigh)}
+                                </b>
+                                {v.upsidePct != null && (
+                                  <span className={`valuation-upside ${v.upsidePct >= 0 ? 'up' : 'down'}`}>
+                                    {fmtPct(v.upsidePct)} vs praegune
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <span className="muted">Õiglast hinda ei saa EPS/book puudumise tõttu arvutada</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="valuation-metrics">
+                          <div><span>P/E</span><b className="mono">{fmtRatio(m.pe ?? m.forwardPE)}</b></div>
+                          <div><span>PEG</span><b className="mono">{fmtRatio(m.pegRatio)}</b></div>
+                          <div><span>P/B</span><b className="mono">{fmtRatio(m.priceToBook)}</b></div>
+                          <div><span>EPS</span><b className="mono">{fmtRatio(m.eps)}</b></div>
+                        </div>
+                        {v.reasons?.length > 0 && (
+                          <ul className="valuation-reasons">
+                            {v.reasons.map((r, i) => (
+                              <li key={i}>{r}</li>
+                            ))}
+                          </ul>
+                        )}
+                        {v.gurus?.length > 0 && (
+                          <ul className="valuation-reasons valuation-gurus">
+                            {v.gurus.map((g, i) => (
+                              <li key={i}>
+                                <strong>{g.guru}:</strong> {g.detail}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <p className="valuation-disclaimer">
+                          Lihtsustatud mudel (P/E, PEG, P/B, dividend, 52W) + Graham/Lynch/Buffett filtrid — ei ole ostu- ega müügisoovitus.
+                          {v.confidence === 'low' ? ' Andmeid napib; skoor on vähem usaldusväärne.' : ''}
+                        </p>
+                      </>
+                    );
+                  })()}
+                </section>
 
                 <section className="symbol-news-section">
                   <h3 className="panel-title">News · {selected}</h3>
@@ -1169,8 +1281,9 @@ export default function StocksApp() {
           </div>
         )}
 
-        {topTab === 'ai' && (
+        {topTab === 'ai' && userId && (
           <ClaudeChat
+            key={userId}
             onBack={() => setTopTab('watchlist')}
             context={{
               headlines: (hotNews.length ? hotNews : symbolNews).slice(0, 6).map((n) => n.title),
@@ -1181,5 +1294,6 @@ export default function StocksApp() {
         )}
       </div>
     </div>
+    </AuthGate>
   );
 }

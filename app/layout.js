@@ -1,4 +1,5 @@
 import './globals.css';
+import { AuthProvider } from '../lib/AuthProvider';
 
 export const metadata = {
   title: 'Investor AI — Stocks',
@@ -15,7 +16,9 @@ export default function RootLayout({ children }) {
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

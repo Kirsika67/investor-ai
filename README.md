@@ -5,8 +5,10 @@ Aktsiate ja fondide jälgija + portfell. Next.js + Supabase + Alpha Vantage.
 ## 1. Supabase seadistamine
 
 1. Mine [supabase.com](https://supabase.com) ja loo uus projekt (eraldi projekt, mitte teacher-ai oma)
-2. Ava **SQL Editor** ja käivita `supabase/schema.sql` sisu
-3. Mine **Settings > API** ja kopeeri `Project URL` ning `anon public` võti
+2. Ava **Authentication → Providers** ja lülita sisse **Email** (parooliga sisselogimine)
+3. Ava **SQL Editor** ja käivita `supabase/schema.sql` sisu
+   - Kui sul on juba vana V1 andmebaas (ilma kasutajateta), käivita hoopis `supabase/migrate-multitenant.sql`
+4. Mine **Settings > API** ja kopeeri `Project URL` ning `anon public` võti
 
 ## 2. Alpha Vantage võti
 
@@ -36,11 +38,15 @@ Seejärel Vercelis: **New Project** → vali see repo → **Environment Variable
 
 ## Mida see V1 juba teeb
 
-- Jälgimisnimekiri: lisa/eemalda sümboleid, päris hinnad Alpha Vantage'ist, salvestatud Supabasesse (püsib lehe värskendamisel)
-- Portfell: osalused (kogus + ostuhind), automaatne kasum/kahjumi arvestus, kokkuvõtte kaardid
+- Sisselogimine (Supabase Auth): iga kasutaja näeb ainult oma andmeid
+- Jälgimisnimekiri: lisa/eemalda sümboleid, päris hinnad, salvestatud Supabasesse (kasutajapõhine + RLS)
+- Portfell: osalused (kogus + ostuhind), automaatne kasum/kahjumi arvestus
+- AI vestlus: isiklikud vestlused (Supabase + RLS), mobiilis hamburger-menüü
 
 ## Järgmine samm (V2)
 
 Vaata `investor-app-spec.md` — järgmisena tuleb "Analüüs" sakk ühe aktsia süvavaatega (fundamentaalid + tehnika + uudised).
 
 **Tähtis piirang:** Alpha Vantage tasuta tase lubab 25 päringut päevas. Kui watchlist/portfell kasvab suureks, tasub kaaluda tasulist taset või päringute vahemällu salvestamist (cache).
+
+**Soovitus:** `/api/chat` on endiselt sessioonita (sõnumid tulevad päringu kehas). Kui tahad kvoodi/kiirusepiirangut kasutaja kaupa, lisa API-le Bearer tokeni kontroll.

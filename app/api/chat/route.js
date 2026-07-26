@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
-import { getQuotes } from '../../../lib/yahoo';
+import { getQuotes, getFundamentals } from '../../../lib/yahoo';
 import { getTrendNews } from '../../../lib/newsRss';
+import { computeValuation, formatValuationForChat } from '../../../lib/valuation';
 
 const FOCUS_LABELS = {
   market: 'Turuülevaade',
@@ -108,7 +109,12 @@ function detectIntent(q) {
   if (/uudis|headline|mis juhtus|miks (tõus|lange)/.test(t)) return 'news';
   if (/risk|volatiil|kui palju kaot|drawdown|hajut/.test(t)) return 'risk';
   if (/võrdle|vs\b|või\b.*parem|erinevus/.test(t)) return 'compare';
-  if (/kas .*mõtet|kas .*tasub|kas .*invest|osta|müü|veel invest|sisse panna|positsioon/.test(t)) {
+  // Analüüs / valuatsioon / P/E / kas mõistlik → täispikk arvutuslik vastus
+  if (
+    /analüüs|analyys|analyze|valuat|p\/e|pe suhe|peg|õiglane hind|kas .*mõistlik|kas .*kallis|kas .*odav|kas .*mõtet|kas .*tasub|kas .*invest|osta|müü|veel invest|sisse panna|positsioon/.test(
+      t
+    )
+  ) {
     return 'invest';
   }
   if (/mis on|mis fond|selgita|tutvusta/.test(t)) return 'explain';
@@ -142,31 +148,37 @@ function lastAssistantSnippet(messages) {
   return last.replace(/\s+/g, ' ').trim().slice(0, 500);
 }
 
-function buildSystemPrompt(prefs, marketLines) {
+function buildSystemPrompt(prefs, marketLines, valuationBlock) {
   const focus = FOCUS_LABELS[prefs?.focus] || FOCUS_LABELS.market;
   const market = marketLines.length
     ? `\nReaalajas andmed (kasuta ainult kui asjakohane):\n${marketLines.join('\n')}`
     : '';
+  const val = valuationBlock
+    ? `\n\n${valuationBlock}\n\nKOHUSTUSLIK: kui kasutaja küsib analüüsi / kas osta / kas mõistlik, NÄITA need arvutused vastuses (P/E, PEG, õiglane hind, tippinvestorite filtrid). Ära räägi üldsõnaliselt — arvuta ja tõlgenda.`
+    : '';
 
-  return `Sa oled Investor AI — professionaalne investeerimisassistent eesti keeles, stiililt nagu Claude.
+  return `Sa oled Investor AI — professionaalne aktsiaanalüütik eesti keeles.
+Sa EI ole Claude ega ChatGPT kloon. Stiil: selge, numbriline, veidi terav, nagu hea research note — mitte üldsõnaline coach.
 
 REEGLID:
-1. See on JÄTKUV VESTLUS. Kasuta kogu eelnevat sõnumilugu. Kui kasutaja ütleb „sellest“, „lähemalt“, „miks“ vms, jätka viimast teemat/sümbolit — ära küsi uuesti, mida ta juba mainis.
-2. Vasta TÄPSELT kasutaja küsimusele. Crypto küsimustele vasta crypto loogikaga (mitte “üksikaktsia risk” malliga). Kui küsitakse “kõige riskantsem crypto”, erista meme/mikro/alt vs BTC/ETH.
-3. Kui mainitakse sümbolit (nt SMH), räägi sellest konkreetselt.
-4. Ära korda küsimust. Ära kasuta malle ega „Sinu küsimus:”.
-5. Ära kleebi juhuslikke uudiste pealkirju ilma seoseta.
-6. Ole aus ja tasakaalukas; ära anna kindlat osta/müü käsku.
-7. Ära leiuta hindu ega uudiseid. Kui andmeid napib, ütle otse.
-8. Fookusevihje (ainult kui aitab): ${focus}.${market}
+1. See on JÄTKUV VESTLUS. Kasuta kogu eelnevat sõnumilugu.
+2. Vasta TÄPSELT kasutaja küsimusele. Kui ta ütleb “Analüüsi AMD”, anna kohe täispikk valuatsiooniarvutus — ära küsi enne horisonti.
+3. Ära korda küsimust. Ära kasuta malle ega „Sinu küsimus:”.
+4. Ole aus; ära anna kindlat osta/müü käsku, aga anna SELGE hinnang: odavam / õiglane / kallim + miks.
+5. Ära leiuta hindu ega kordajaid. Kasuta ainult ARVUTATUD VALUATSIOON plokis olevaid numbreid.
+6. Too sisse tippinvestorite loogika (nimeliselt): Benjamin Graham (P/E, P/B, margin of safety), Peter Lynch (PEG), Warren Buffett (earnings yield / kvaliteet).
+7. Fookusevihje (ainult kui aitab): ${focus}.${market}${val}
 
-PIKKUS JA STRUKTUUR (eriti esimesele “kas investeerida / kas mõtet” küsimusele):
-Kirjuta PIKK, Claude’i-stiilis analüüs (umbes 350–550 sõna), mitte 3–4 lauset.
+PIKKUS JA STRUKTUUR (analüüs / kas investeerida):
+Kirjuta PIKK research-stiilis vastus (umbes 450–700 sõna), mitte 3–4 lauset.
 Kasuta pealkirju:
+**Mis me arvutame**
+**Numbrid ja õiglane hind**
+**Graham / Lynch / Buffett**
 **Argumendid POOLT**
 **Argumendid VASTU / riskid**
-**Minu tegelik vastus**
-Iga plokk 4–6 sisukat punkti või lõiku. Too sisse struktuuritrend, fundamentaalid, valuatsioon/risk, osakaal, horisont. Kui on uudiste pealkirju kontekstis, seo need analüüsiga (ära kleebi toorelt lõppu).`;
+**Kokkuvõte (kas tundub mõistlik)**
+Iga plokk sisukas. Lõpus üks lühike disclaimer: ei ole isiklik soovitus.`;
 }
 
 function fmtPct(n) {
@@ -193,7 +205,7 @@ async function callOpenAI({ system, messages }) {
     body: JSON.stringify({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       temperature: 0.55,
-      max_tokens: 1800,
+      max_tokens: 2800,
       messages: [{ role: 'system', content: system }, ...messages],
     }),
   });
@@ -214,63 +226,153 @@ function priceLine(quote) {
   return `${quote.symbol}${name}: $${p}${pct ? ` (${pct} täna)` : ''}`;
 }
 
-function answerInvest(sym, info, quote, headlines = []) {
-  const name = info?.name || sym;
+function answerInvest(sym, info, quote, headlines = [], valuationBundle = null) {
+  const name = info?.name || quote?.name || sym;
   const kind = info?.kind === 'etf' ? 'ETF' : 'aktsia';
   const price = priceLine(quote);
-  const tracks = info?.tracks || 'konkreetset turu-/sektorilugu';
+  const tracks = info?.tracks || (kind === 'ETF' ? 'sektori/indeksi korvi' : 'üksikaktsia äri');
   const note = info?.note || '';
   const newsBits = (headlines || []).slice(0, 3).map((h) => decodeEntities(h)).filter(Boolean);
+  const v = valuationBundle?.valuation;
+  const m = valuationBundle?.metrics || {};
 
   const parts = [];
 
   parts.push(
-    `Küsimus **${sym}** (${name}) kohta väärib tasakaalustatud pilti — mitte ühte “jah/ei” lauset. All on **POOLT**, **VASTU** ja siis **minu tegelik vastus**, et saaksid ise otsustada.`
+    `**${sym}** (${name}) — Investor AI valuatsiooniarvutus. All on numbrid, tippinvestorite filtrid, siis poolt/vastu ja selge kokkuvõte. See ei ole ostukäsk.`
   );
+
+  parts.push('**Mis me arvutame**');
+  parts.push(
+    [
+      `• Vaatame, kas praegune hind on **mõistlik** P/E, PEG, P/B ja õiglase hinna suhtes — mitte ainult “kas lugu on ilus”.`,
+      `• ${sym} on ${kind}: ${tracks}.`,
+      note ? `• Kontekst: ${note}` : null,
+      `• Klassika: **Graham** (odavus + margin of safety), **Lynch** (PEG = kasv õiglase hinnaga), **Buffett** (earnings yield + äri kvaliteet).`,
+    ]
+      .filter(Boolean)
+      .join('\n')
+  );
+
+  parts.push('**Numbrid ja õiglane hind**');
+  if (v && v.label !== 'unknown') {
+    const peLine =
+      m.pe != null
+        ? `Trailing P/E **${Number(m.pe).toFixed(1)}**` +
+          (m.forwardPE != null ? ` · forward P/E **${Number(m.forwardPE).toFixed(1)}**` : '')
+        : m.forwardPE != null
+          ? `Forward P/E **${Number(m.forwardPE).toFixed(1)}**`
+          : 'P/E andmed napivad';
+    const pegLine = m.pegRatio != null ? `PEG **${Number(m.pegRatio).toFixed(2)}**` : 'PEG puudub';
+    const pbLine = m.priceToBook != null ? `P/B **${Number(m.priceToBook).toFixed(2)}**` : 'P/B puudub';
+    const epsLine = m.eps != null ? `EPS **$${Number(m.eps).toFixed(2)}**` : 'EPS puudub';
+    parts.push(
+      [
+        price ? `• Turuhind: ${price}` : `• Hind: vaata Watchlistist`,
+        `• ${peLine}`,
+        `• ${pegLine} · ${pbLine} · ${epsLine}`,
+        v.fairLow != null && v.fairHigh != null
+          ? `• **Õiglane hind (EPS × mõistlik P/E bänd):** $${Number(v.fairLow).toFixed(2)} – $${Number(v.fairHigh).toFixed(2)}` +
+            (v.upsidePct != null
+              ? ` → erinevus mudeli keskpunktist **${v.upsidePct >= 0 ? '+' : ''}${v.upsidePct.toFixed(1)}%**`
+              : '')
+          : `• Õiglast hinda ei saanud täielikult arvutada (EPS/book napib).`,
+        v.score != null
+          ? `• **Meie skoor: ${v.score}/100 → ${v.labelEt}** (kindlus: ${v.confidence}).`
+          : `• Skoori ei saanud usaldusväärselt arvutada.`,
+      ].join('\n')
+    );
+    if (v.reasons?.length) {
+      parts.push(v.reasons.map((r) => `• ${r}`).join('\n'));
+    }
+  } else if (v?.labelEt === 'ETF / fond') {
+    parts.push(
+      [
+        price ? `• ${price}` : null,
+        `• ETF/fondi puhul üksikaktsia P/E mudel ei sobi hästi. Hinda kulu, jälgitavat indeksit ja oma riskitaluvust.`,
+        `• Võrdle laiema turuga (nt VOO) — kas sektori kontsentratsioon on teadlik valik.`,
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+  } else {
+    parts.push(
+      [
+        price ? `• ${price}` : `• Hinnahetke ei saanud.`,
+        `• Fundamentaalid (P/E/EPS) ei tulnud täielikult — all on ikkagi kvalitatiivne analüüs; Ava Watchlistis „Kas on mõistlik?“ kui andmed hiljem ilmuvad.`,
+      ].join('\n')
+    );
+  }
+
+  parts.push('**Graham / Lynch / Buffett**');
+  if (v?.gurus?.length) {
+    parts.push(v.gurus.map((g) => `• **${g.guru}** — ${g.detail}`).join('\n'));
+  } else {
+    parts.push(
+      [
+        `• **Graham:** otsis P/E ≤ 15 ja P/E×P/B ≤ 22.5 — “margin of safety”. Kaasaegne tech jääb sellest filtrist sageli välja; siis loeb kvaliteet rohkem kui puhas odavus.`,
+        `• **Lynch:** PEG = P/E ÷ kasv%; ≤1 = kasv odavalt, >1.5 = maksad kasvule liiga palju.`,
+        `• **Buffett:** pigem suurepärane äri õiglase hinnaga; earnings yield (1/P/E) peab konkureerima võlakirjaga, kui moat on nõrk.`,
+      ].join('\n')
+    );
+  }
 
   parts.push('**Argumendid POOLT**');
   parts.push(
     [
-      `• **Selge teema.** ${sym} on ${kind}, mis jälgib: ${tracks}. Kui see narratiiv (kasv, tehnoloogia, sektor) sul on pikaajaline, on fond/aktsia loogiline viis sellele panustada.`,
-      `• **Struktuuritrend vs spekulatsioon.** Kui nõudlus tuleb suurettevõtete investeeringutest ja rahavoost (mitte ainult hype’ist), on tees tugevam kui 2000. a dot-com’is.`,
-      note ? `• **Mida fond/aktsia ise ütleb.** ${note}` : `• **Hajutus ühe nime sees.** ${kind === 'ETF' ? 'ETF hajutab mitme nime peale — vähem üksikaktsiaõnnetust kui nt ainult NVDA.' : 'Üksikaktsia annab suurema upside’i, aga ka suurema idioriskiga.'}`,
-      `• **Pikk horisont aitab.** 5–10 a vaates on sektori/kasvu lood ajalooliselt andnud tugevaid tootlusi — minevik ei ole garantii, aga see näitab, miks investorid ${sym}-d üldse kaaluvad.`,
-      price ? `• **Praegune turg.** ${price} — kasuta seda taustaks, mitte ainsa ostusignaalina.` : `• **Hind.** Vaata Watchlistist värsket hinda enne otsust.`,
-    ].join('\n')
+      `• **Tees.** Kui ${tracks} on sinu 5–10 a narratiiv, on ${sym} loogiline viis sellele panustada.`,
+      kind === 'ETF'
+        ? `• **Hajutus.** ETF vähendab ühe nime õnnetust võrreldes üksikaktsiaga.`
+        : `• **Upside.** Üksikaktsia annab suurema potentsiaali kui lai indeks — kui tees peab.`,
+      v?.label === 'cheap'
+        ? `• **Valuatsioon toetab.** Meie mudel märgib hetkel **odavam** (skoor ${v.score}) — numbrid ei ütle “osta kohe”, aga hind ei ole mudeli järgi ülepaisutatud.`
+        : v?.label === 'fair'
+          ? `• **Hind on umbes õiglane.** Ei ole “kingitus”, aga ka mitte ilmne mull meie P/E–PEG raamistikus.`
+          : `• **Lugu võib olla tugev isegi kui kordajad on kõrged** — Buffett maksaks kvaliteedi eest; siis pead usaldama moati, mitte ainult P/E-d.`,
+      price ? `• **Praegune turg:** ${price} — kasuta taustaks.` : null,
+    ]
+      .filter(Boolean)
+      .join('\n')
   );
 
   parts.push('**Argumendid VASTU / riskid**');
   parts.push(
     [
-      `• **Valuatsioon ja “hea uudis on juba hinnas”.** Pärast tugevat rallit võib järgmine positiivne pealkiri hinda vähem liigutada; ootuste langus teeb vastupidist.`,
-      `• **Kontsentratsioon ja beeta.** ${kind === 'ETF' ? 'Kitsas sektorifond liigub turust enamasti tugevamini — kui tippnimed (nt NVDA jt) komistavad, tunnetab kogu korv seda.' : 'Üksikaktsia võib ühe uudisega −20…−40% teha.'}`,
-      `• **Tsükkel ja meeleolu.** Pooljuhtide/AI lood on volatiilsed: kuude lõikes võivad tulla suured drawdown’id isegi kui pikaajaline tees jääb alles.`,
-      `• **Ajahorisont.** Kui raha võib vaja minna 1–2 aasta jooksul, on ${sym} halb koht “parkimiseks”.`,
-      `• **Osakaalu risk.** Kui ${sym} on juba suur tükk portfellist, lisamine suurendab kontsentratsiooni — isegi kui tees on õige.`,
+      v?.label === 'expensive'
+        ? `• **Valuatsioon on range.** Skoor ${v.score}/100 (**${v.labelEt}**) — “hea uudis” võib juba hinnas olla; ootuste langus teeb haiget.`
+        : `• **Valuatsioon ja ootused.** Isegi “õiglase” hinna juures võib sentiment ühe kvartaliga −20…−40% teha.`,
+      `• **Kontsentratsioon.** ${kind === 'ETF' ? 'Kitsas sektorifond liigub turust enamasti rohkem.' : 'Üksikaktsia idiorisk on suur.'}`,
+      `• **Horisont.** Kui raha võib vaja minna 1–2 a jooksul, on ${sym} halb “parkimine”.`,
+      `• **Osakaal.** Kui ${sym} on juba suur tükk portfellist, lisamine suurendab riski isegi kui tees on õige.`,
     ].join('\n')
   );
 
   if (newsBits.length) {
-    parts.push('**Mida uudised praegu taustaks annavad**');
+    parts.push('**Uudiste taust**');
     parts.push(
-      [
-        ...newsBits.map((h) => `• ${h}`),
-        'Kasuta pealkirju kontekstina: need selgitavad *miks* turg täna räägib, mitte ei anna automaatset osta/müü signaali.',
-      ].join('\n')
+      [...newsBits.map((h) => `• ${h}`), 'Pealkirjad selgitavad *miks* turg räägib — mitte automaatset osta/müü.'].join(
+        '\n'
+      )
     );
   }
 
-  parts.push('**Minu tegelik vastus**');
+  parts.push('**Kokkuvõte (kas tundub mõistlik)**');
+  const verdict =
+    v?.label === 'cheap'
+      ? `Numbrite järgi tundub **pigem odavam / mõistlikum** (skoor ${v.score}). Sobib kaalumiseks, kui tees ja horisont klapivad.`
+      : v?.label === 'fair'
+        ? `Numbrite järgi **õiglane** (skoor ${v.score}) — ei ole ilmne allahindlus ega ilmne mull. Otsus sõltub kvaliteedist ja sinu osakaalust.`
+        : v?.label === 'expensive'
+          ? `Numbrite järgi **kallim** (skoor ${v.score}). “Mõistlik” ainult siis, kui usud erakordset kasvu/moati — Graham/Lynch filtrid on range.`
+          : `Andmeid napib täielikuks skooriks — ära otsusta ainult pealkirja pealt; vaata P/E/EPS Watchlistis.`;
+
   parts.push(
     [
-      `Lihtsat “jah” või “ei” ei ole. See sõltub sinu **horisondist**, **riskitaluvusest** ja sellest, kui palju AI/tech/sektorit sul juba portfellis on.`,
-      `**Sobib pigem siis, kui:** (1) sul on juba lai baas (nt VOO/SPY/maailm), (2) ${sym} jääb satelliidiks (sageli ~5–15%), (3) talud −30…−50% sektori drawdown’i ilma sundmüügita, (4) lisad keskmistades, mitte “all-in”.`,
-      `**Pigem ära / ära lisa, kui:** vajad raha varsti, ${sym} on juba liiga suur osakaal, või ostad ainult sellepärast et “kõik räägivad”.`,
-      price ? `Hetke viide: ${price}.` : '',
-      'Ma ei ole litsentseeritud nõustaja — see on analüüs otsuse toetuseks, mitte käsk osta või mitte osta.',
-    ]
-      .filter(Boolean)
-      .join('\n\n')
+      verdict,
+      `**Sobib pigem, kui:** lai baas olemas (nt VOO), ${sym} on satelliit (~5–15%), talud suurt drawdown’i, lisad keskmistades.`,
+      `**Pigem ära / ära lisa, kui:** vajad raha varsti, ${sym} on juba liiga suur, või ostad ainult hype’i pärast.`,
+      `_Investor AI arvutusmudel (P/E, PEG, P/B, 52W) + Graham/Lynch/Buffett filtrid. Ei ole isiklik finantsnõuanne._`,
+    ].join('\n\n')
   );
 
   return parts.join('\n\n');
@@ -453,7 +555,7 @@ function answerDeepen(sym, info, quote, prevSnippet, question) {
   return lines.join('\n\n');
 }
 
-function localReply({ messages, context, quotesBySym }) {
+function localReply({ messages, context, quotesBySym, valuationBySym }) {
   const last = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
   const q = last.trim();
   const followUp = isFollowUp(q);
@@ -463,38 +565,36 @@ function localReply({ messages, context, quotesBySym }) {
   const primary = symbols[0] || null;
   const info = primary ? KNOWN[primary] : null;
   const quote = primary ? quotesBySym[primary] : null;
+  const valuationBundle = primary ? valuationBySym?.[primary] : null;
   let intent = detectIntent(q);
 
-  // Järgnev küsimus ilma sümbolita → jätka eelmise teemaga
   if (followUp && primary && (intent === 'general' || intent === 'deepen' || intent === 'explain')) {
     intent = 'deepen';
   }
 
   if (primary && intent === 'invest') {
-    return answerInvest(primary, info || { name: primary }, quote, context?.headlines || []);
+    return answerInvest(primary, info || { name: primary }, quote, context?.headlines || [], valuationBundle);
   }
   if (primary && intent === 'deepen') {
-    // “Räägi lähemalt” → anna täispikk Claude-stiilis analüüs, mitte 3 lauset
-    if (/lähemalt|rohkem|detail|täpsusta|räägi|sellest|seda/.test(q.toLowerCase())) {
-      return answerInvest(primary, info || { name: primary }, quote, context?.headlines || []);
+    if (/lähemalt|rohkem|detail|täpsusta|räägi|sellest|seda|analüüs/.test(q.toLowerCase())) {
+      return answerInvest(primary, info || { name: primary }, quote, context?.headlines || [], valuationBundle);
     }
     return answerDeepen(primary, info || { name: primary }, quote, lastAssistantSnippet(messages), q);
   }
-  if (primary && intent === 'explain') return answerExplain(primary, info || { name: primary, kind: 'stock' }, quote);
-  if (primary && intent === 'price') return answerPrice(primary, quote, info);
-  if (intent === 'crypto') {
-    return answerCryptoRisk(q);
+  if (primary && intent === 'explain') {
+    return answerInvest(primary, info || { name: primary }, quote, context?.headlines || [], valuationBundle);
   }
+  if (primary && intent === 'price') return answerPrice(primary, quote, info);
+  if (intent === 'crypto') return answerCryptoRisk(q);
   if (intent === 'compare') {
     const pair = symbols.length >= 2 ? symbols : primary ? [primary, 'VOO'] : historySymbols;
     return answerCompare(pair, quotesBySym);
   }
   if (intent === 'risk') {
     if (!primary && !historySymbols[0]) {
-      // “risk” ilma sümbolita — ära anna tühja aktsiamalli
       if (/crypto|krüpto|btc|eth/.test(q.toLowerCase())) return answerCryptoRisk(q);
       return [
-        'Riskist rääkimiseks ütle **mis** (nt SMH, NVDA, BTC) või küsi otse: “milline crypto on kõige riskantsem?”.',
+        'Riskist rääkimiseks ütle **mis** (nt SMH, NVDA, BTC).',
         'Üldiselt: kitsas sektor / üksiknimi / meme-crypto / leverage = kõrgem risk; lai indeks = madalam.',
       ].join('\n\n');
     }
@@ -503,23 +603,25 @@ function localReply({ messages, context, quotesBySym }) {
   if (intent === 'news') return answerNews(q, context?.headlines);
 
   if (primary) {
-    return (
-      answerExplain(primary, info || { name: quote?.name || primary, kind: 'stock' }, quote) +
-      '\n\nKui tahad otsust “kas osta/juurde panna”, ütle horisont (nt 1 a / 5 a) ja soovitud osakaal — jätkan sealt.'
+    return answerInvest(
+      primary,
+      info || { name: quote?.name || primary, kind: 'stock' },
+      quote,
+      context?.headlines || [],
+      valuationBundle
     );
   }
 
   if (/tervit|hei|tere|help|abi/.test(q.toLowerCase())) {
-    return 'Tere — küsi vabalt, nt „kas SMH-sse on mõtet investeerida?”. Saame samas vestluses edasi minna (“räägi lähemalt”, “aga risk?” jne).';
+    return 'Tere — olen Investor AI. Küsi nt „Analüüsi AMD” või „kas SMH on mõistlik?” — annan P/E, PEG ja Graham/Lynch/Buffett filtritega arvutuse.';
   }
 
-  // Kui on vestlusajalugu, ära lange tühja malli peale
   const prev = lastAssistantSnippet(messages);
   if (prev) {
-    return `Sa ütlesid: “${q}”. Jään eelmise teema juurde — täpsusta palun üks asi: kas räägime **riskist**, **osakaalust**, **võrdlusest** (nt vs VOO) või **hinnaliikumisest**? Siis lähen otse sügavuti.`;
+    return `Sa ütlesid: “${q}”. Jään eelmise teema juurde — täpsusta: **risk**, **osakaal**, **võrdlus** või **valuatsioon (P/E)**?`;
   }
 
-  return `Küsi vabalt konkreetset sümbolit või teemat (nt SMH, VOO, risk). Saame sellest pikalt edasi vestelda.`;
+  return `Küsi sümbolit (nt „Analüüsi NVDA”) — arvutan P/E, PEG, õiglase hinna ja võrdlen Grahami / Lynchi / Buffetti loogikaga.`;
 }
 
 export async function POST(request) {
@@ -556,6 +658,43 @@ export async function POST(request) {
       }
     }
 
+    // Valuatsiooniarvutus peamise sümboli jaoks
+    const valuationBySym = {};
+    if (symbols[0]) {
+      const sym = symbols[0];
+      try {
+        const fundamentals = await getFundamentals(sym);
+        const q = quotesBySym[sym] || {};
+        const metrics = {
+          symbol: sym,
+          name: q.name || fundamentals.sector || sym,
+          price: q.price ?? null,
+          pe: fundamentals.pe ?? q.pe ?? null,
+          forwardPE: fundamentals.forwardPE ?? null,
+          pegRatio: fundamentals.pegRatio ?? null,
+          priceToBook: fundamentals.priceToBook ?? null,
+          bookValue: fundamentals.bookValue ?? null,
+          eps: fundamentals.eps ?? q.eps ?? null,
+          yield: fundamentals.yield ?? q.yield ?? null,
+          beta: fundamentals.beta ?? q.beta ?? null,
+          fiftyTwoWeekHigh: fundamentals.fiftyTwoWeekHigh ?? null,
+          fiftyTwoWeekLow: fundamentals.fiftyTwoWeekLow ?? null,
+          profitMargins: fundamentals.profitMargins ?? null,
+          revenueGrowth: fundamentals.revenueGrowth ?? null,
+          earningsGrowth: fundamentals.earningsGrowth ?? null,
+          sector: fundamentals.sector ?? null,
+          industry: fundamentals.industry ?? null,
+          quoteType: fundamentals.quoteType ?? null,
+        };
+        valuationBySym[sym] = {
+          metrics,
+          valuation: computeValuation(metrics),
+        };
+      } catch {
+        // ignore — local/OpenAI töötab ilma
+      }
+    }
+
     // Lisa sümboli uudised konteksti (pika analüüsi jaoks)
     if (symbols[0] && !(context.headlines && context.headlines.length)) {
       try {
@@ -579,7 +718,12 @@ export async function POST(request) {
       .filter(Boolean)
       .map((line) => `• ${line}`);
 
-    let system = buildSystemPrompt(prefs, marketLines);
+    const primaryVal = symbols[0] ? valuationBySym[symbols[0]] : null;
+    const valuationBlock = primaryVal
+      ? formatValuationForChat(primaryVal.metrics, primaryVal.valuation)
+      : '';
+
+    let system = buildSystemPrompt(prefs, marketLines, valuationBlock);
     if (context.headlines?.length) {
       system += `\n\nSeotud uudiste pealkirjad (kasuta ainult kui asjakohane, ära kleebi toorelt):\n${context.headlines
         .slice(0, 5)
@@ -587,20 +731,31 @@ export async function POST(request) {
         .join('\n')}`;
     }
 
+    const lastUserIntent = detectIntent(lastUser);
+    const wantsValuation =
+      lastUserIntent === 'invest' ||
+      (symbols[0] && /analüüs|analyze|mõistlik|p\/e|peg|valuat/i.test(lastUser));
+
     let reply = null;
     let mode = 'local';
     let openaiError = null;
 
-    try {
-      reply = await callOpenAI({ system, messages: normalized });
-      if (reply) mode = 'openai';
-    } catch (e) {
-      openaiError = e.message || 'OpenAI viga';
-    }
+    // Analüüsiküsimustel eelistame arvutuskindlat local vastust
+    if (wantsValuation && symbols[0]) {
+      reply = localReply({ messages: normalized, context, quotesBySym, valuationBySym });
+      mode = 'valuation';
+    } else {
+      try {
+        reply = await callOpenAI({ system, messages: normalized });
+        if (reply) mode = 'openai';
+      } catch (e) {
+        openaiError = e.message || 'OpenAI viga';
+      }
 
-    if (!reply) {
-      reply = localReply({ messages: normalized, context, quotesBySym });
-      mode = openaiError ? 'local_fallback' : 'local';
+      if (!reply || (symbols[0] && reply.length < 500 && /analüüs|amd|nvda|aapl|invest/i.test(lastUser))) {
+        reply = localReply({ messages: normalized, context, quotesBySym, valuationBySym });
+        mode = openaiError ? 'local_fallback' : 'local';
+      }
     }
 
     return NextResponse.json({
