@@ -24,6 +24,18 @@ function fmtPct(n) {
 function shortWhy({ kind, changePercent, name }) {
   const pct = fmtPct(changePercent);
   const who = name || '';
+  if (kind === 'growth') {
+    return `${who ? `${who}: ` : ''}Yahoo growth-tech nimekirjas (${pct}). See on kasvuettevõte, mitte päeva tipptõusja — täna võib hind olla miinuses.`;
+  }
+  if (kind === 'value') {
+    return `${who ? `${who}: ` : ''}undervalued-growth nimekirjas (${pct}). Turg hindab kasvu odavamalt.`;
+  }
+  if (kind === 'smallcap') {
+    return `${who ? `${who}: ` : ''}small-cap nimekirjas (${pct}).`;
+  }
+  if (kind === 'shorted') {
+    return `${who ? `${who}: ` : ''}enim shortitud nimekirjas (${pct}).`;
+  }
   if (kind === 'up') {
     return `${who ? `${who}: ` : ''}päeva tipptõusjate seas (${pct}). Liikumine on kuum, sest tõus toob kauplejaid ja pealkirju — allpool uudised ja analüüs, kas katalüsaator on päris või ainult momentum.`;
   }
@@ -42,9 +54,25 @@ function localAnalysis({ symbol, kind, quote, headlines }) {
   const price = quote?.price != null ? `$${Number(quote.price).toFixed(2)}` : null;
   const lines = [];
 
-  lines.push(`**Miks ${symbol} on praegu kuum?**`);
+  lines.push(`**Miks ${symbol} on selles nimekirjas?**`);
 
-  if (kind === 'up') {
+  if (kind === 'growth') {
+    lines.push(
+      `${name} on Yahoo **growth-tech** nimekirjas (${pct}${price ? `, hind ${price}` : ''}). See tähendab kasvuprofiili, mitte et täna peab olema plussis. Miinus täna on tavaline — küsi, kas P/E/PEG on mõistlik.`
+    );
+  } else if (kind === 'value') {
+    lines.push(
+      `${name} on undervalued-growth nimekirjas (${pct}${price ? `, hind ${price}` : ''}). Fookus on odavam kasv, mitte päeva nool.`
+    );
+  } else if (kind === 'smallcap') {
+    lines.push(
+      `${name} on small-cap nimekirjas (${pct}${price ? `, hind ${price}` : ''}). Väiksemad nimed on volatiilsemad.`
+    );
+  } else if (kind === 'shorted') {
+    lines.push(
+      `${name} on enim shortitud nimekirjas (${pct}${price ? `, hind ${price}` : ''}). Palju vastaspositsioone.`
+    );
+  } else if (kind === 'up') {
     lines.push(
       `${name} on päeva tipptõusjate seas (${pct}${price ? `, hind ${price}` : ''}). Selline liikumine tõmbab lühiajalisi kauplejaid ja algoritme; “hea” on see siis, kui tõusu toetab selge katalüsaator (tulemused, leping, sektori uudis) — mitte ainult tühine squeeze.`
     );

@@ -13,7 +13,7 @@ export async function GET(request) {
   const valid = TREND_TYPES.some((t) => t.id === type) ? type : 'all';
 
   try {
-    const data = await cached(`trends-v1:${valid}`, 4 * 60 * 1000, async () => {
+    const data = await cached(`trends-v2:${valid}`, 4 * 60 * 1000, async () => {
       if (valid === 'all') {
         const movers = await getTopMovers();
         const symbols = [

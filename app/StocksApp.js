@@ -540,19 +540,14 @@ export default function StocksApp() {
           mapped.push(
             ...custom.slice(0, 10).map((m) => ({
               id: `${trendType}-${m.symbol}`,
-              kind: customKind,
+              kind: trendType,
               section: trendType,
               sectionTitle: customTitle,
               symbol: m.symbol,
               name: m.name,
               price: m.price,
               changePercent: m.changePercent,
-              text:
-                customKind === 'up'
-                  ? `↑ ${m.symbol} ${fmtPct(m.changePercent)}`
-                  : customKind === 'down'
-                    ? `↓ ${m.symbol} ${fmtPct(m.changePercent)}`
-                    : `${m.symbol} · ${fmtPct(m.changePercent)}`,
+              text: `${m.symbol} · ${fmtPct(m.changePercent)}`,
               why: trendWhy(trendType, m.changePercent),
             }))
           );
@@ -754,7 +749,7 @@ export default function StocksApp() {
     try {
       const qs = new URLSearchParams({
         symbol: item.symbol,
-        kind: item.kind || 'active',
+        kind: item.section || item.kind || 'active',
         changePercent: String(item.changePercent ?? ''),
         _: String(Date.now()),
       });
@@ -1244,7 +1239,11 @@ export default function StocksApp() {
               <>
                 <h3 className="panel-title">Trends</h3>
                 <p className="muted trends-intro">
-                  Vali trenditüüp ülevalt — klõpsa real, et avada uudised ja AI analüüs.
+                  {trendType === 'growth'
+                    ? 'Growth Tech = Yahoo kasvuaktsiad (NVDA jms). See ei ole päeva tõusjate nimekiri — täna võivad nad olla miinuses. % näitab tänast päeva, nimekiri näitab kasvutüüpi.'
+                    : trendType === 'value'
+                      ? 'Undervalued growth = kasv, mida turg odavamalt hindab. Tänane % võib olla plussis või miinuses.'
+                      : 'Vali nimekiri ülevalt — klõpsa real, et avada uudised ja analüüs.'}
                 </p>
 
                 <div className="news-topics" role="tablist" aria-label="Trendide tüübid">
