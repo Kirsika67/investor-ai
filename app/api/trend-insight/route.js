@@ -112,7 +112,15 @@ async function callOpenAI({ symbol, kind, quote, headlines }) {
   const pct = fmtPct(quote?.changePercent);
   const price = quote?.price != null ? `$${Number(quote.price).toFixed(2)}` : 'n/a';
   const kindLabel =
-    kind === 'up' ? 'päeva tõusja' : kind === 'down' ? 'päeva langeja' : kind === 'active' ? 'kõige aktiivsem' : 'uudistes';
+    {
+      up: 'päeva tõusja',
+      down: 'päeva langeja',
+      active: 'kõige aktiivsem',
+      growth: 'growth-tech nimekiri (mitte päeva tõusja)',
+      value: 'undervalued growth',
+      smallcap: 'small cap',
+      shorted: 'enim shortitud',
+    }[kind] || 'uudistes';
 
   const system = `Sa oled Investor AI. Kirjuta eesti keeles professionaalne, selge trendianalüüs.
 Struktuur:
