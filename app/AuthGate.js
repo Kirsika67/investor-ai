@@ -5,7 +5,7 @@ import { useAuth } from '../lib/AuthProvider';
 
 export default function AuthGate({ children }) {
   const { user, loading, signIn, signUp } = useAuth();
-  const [mode, setMode] = useState('signin'); // signin | signup
+  const [mode, setMode] = useState('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -17,7 +17,7 @@ export default function AuthGate({ children }) {
     return (
       <div className="auth-gate">
         <div className="auth-card">
-          <p className="auth-muted">Laen sessiooni…</p>
+          <p className="auth-muted">Avame desk’i…</p>
         </div>
       </div>
     );
@@ -35,10 +35,8 @@ export default function AuthGate({ children }) {
         await signIn(email.trim(), password);
       } else {
         const result = await signUp(email.trim(), password, fullName.trim());
-        if (result.session) {
-          // Auto-logged in (email confirm disabled)
-        } else {
-          setInfo('Konto loodud. Kui e-posti kinnitus on sisse lülitatud, kinnita link ja logi siis sisse.');
+        if (!result.session) {
+          setInfo('Konto loodud. Kui e-posti kinnitus on sees, kinnita link ja logi sisse.');
           setMode('signin');
         }
       }
@@ -51,12 +49,24 @@ export default function AuthGate({ children }) {
 
   return (
     <div className="auth-gate">
-      <div className="auth-card">
-        <div className="auth-brand">Investor AI</div>
-        <h1>{mode === 'signin' ? 'Logi sisse' : 'Loo konto'}</h1>
-        <p className="auth-lead">
-          Iga kasutaja näeb ainult oma vestlusi, jälgimisnimekirja ja portfelli.
+      <section className="auth-manifesto">
+        <div className="auth-kicker">Investor AI Desk</div>
+        <h1>Ära osta lugu. Arvuta, kas hind on mõistlik.</h1>
+        <p>
+          See ei ole chat-mänguasi. See on research-laud: P/E, PEG, õiglane hind ja
+          Grahami / Lynchi / Buffetti filtrid — iga sümboli kohta, enne kui raha liigub.
         </p>
+        <ul className="auth-principles">
+          <li>Iga kasutaja näeb ainult oma raamatut ja vestlusi</li>
+          <li>Analüütik peab näitama numbreid, mitte üldsõnu</li>
+          <li>Otsus jääb sinule — mudel on tööriist, mitte oraakel</li>
+        </ul>
+      </section>
+
+      <div className="auth-card">
+        <div className="auth-brand">Desk</div>
+        <h1>{mode === 'signin' ? 'Logi sisse' : 'Loo konto'}</h1>
+        <p className="auth-lead">Isiklik jälgimisnimekiri, portfell ja analüütik.</p>
 
         <form className="auth-form" onSubmit={onSubmit}>
           {mode === 'signup' && (
@@ -99,7 +109,7 @@ export default function AuthGate({ children }) {
           {info && <div className="auth-info">{info}</div>}
 
           <button type="submit" disabled={busy}>
-            {busy ? 'Palun oota…' : mode === 'signin' ? 'Logi sisse' : 'Loo konto'}
+            {busy ? 'Palun oota…' : mode === 'signin' ? 'Ava desk' : 'Alusta'}
           </button>
         </form>
 

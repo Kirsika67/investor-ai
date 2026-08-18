@@ -2,8 +2,8 @@ import './globals.css';
 import { AuthProvider } from '../lib/AuthProvider';
 
 export const metadata = {
-  title: 'Investor AI — Stocks',
-  description: 'Yahoo Finance stiilis aktsiate jälgija + trendid + AI',
+  title: 'Investor AI Desk',
+  description: 'Research desk: arvuta, kas aktsia on mõistlik — P/E, PEG, Graham, Lynch, Buffett.',
 };
 
 export default function RootLayout({ children }) {

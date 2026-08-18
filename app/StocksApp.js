@@ -227,7 +227,9 @@ export default function StocksApp() {
   const searchRef = useRef(null);
   const searchTimer = useRef(null);
   const detailRef = useRef(null);
-  const [topTab, setTopTab] = useState('watchlist'); // watchlist | news | trends | ai
+  const [topTab, setTopTab] = useState('desk');
+  const [deskAsk, setDeskAsk] = useState('');
+  const [analystSeed, setAnalystSeed] = useState('');
   const [marketTape, setMarketTape] = useState([]);
 
   const selectedQuote = quotes[selected];
@@ -738,6 +740,13 @@ export default function StocksApp() {
     setTrendInsightLoading(false);
   }
 
+  function askAnalyst(text) {
+    const q = String(text || '').trim();
+    if (!q) return;
+    setAnalystSeed(q);
+    setTopTab('ai');
+  }
+
   const watchlistRows = (
     <>
       {loadingList && <div className="side-empty">Laen…</div>}
@@ -770,54 +779,50 @@ export default function StocksApp() {
 
   return (
     <AuthGate>
-    <div className={`stocks-shell ${topTab === 'ai' ? 'ai-mode' : ''}`}>
-      {topTab !== 'ai' && (
-        <header className="stocks-topnav">
-          <span className="topnav-brand">Investor AI</span>
-          <nav className="topnav-tabs">
-            <button
-              type="button"
-              className={topTab === 'watchlist' ? 'active' : ''}
-              onClick={() => {
-                setTopTab('watchlist');
-                setTimeout(() => searchRef.current?.focus(), 50);
-              }}
-            >
-              My Watchlist
-            </button>
-            <button
-              type="button"
-              className={topTab === 'news' ? 'active' : ''}
-              onClick={() => setTopTab('news')}
-            >
-              News
-            </button>
-            <button
-              type="button"
-              className={topTab === 'trends' ? 'active' : ''}
-              onClick={() => {
+    <div className="stocks-shell">
+      <header className="stocks-topnav">
+        <span className="topnav-brand">Desk</span>
+        <nav className="topnav-tabs">
+          <button type="button" className={topTab === 'desk' ? 'active' : ''} onClick={() => setTopTab('desk')}>
+            Desk
+          </button>
+          <button
+            type="button"
+            className={topTab === 'watchlist' ? 'active' : ''}
+            onClick={() => {
+              setTopTab('watchlist');
+              setTimeout(() => searchRef.current?.focus(), 50);
+            }}
+          >
+            Raamat
+          </button>
+          <button type="button" className={topTab === 'news' ? 'active' : ''} onClick={() => setTopTab('news')}>
+            Uudised
+          </button>
+          <button
+            type="button"
+            className={topTab === 'trends' ? 'active' : ''}
+            onClick={() => {
               setTopTab('trends');
               setTrendDetail(null);
               setTrendInsight(null);
             }}
-            >
-              Trends
-            </button>
-            <button type="button" className={topTab === 'ai' ? 'active' : ''} onClick={() => setTopTab('ai')}>
-              AI vestlus
-            </button>
-          </nav>
-          <div className="topnav-user">
-            <span className="topnav-user-name">{displayName}</span>
-            <button type="button" className="topnav-signout" onClick={() => signOut()}>
-              Logi välja
-            </button>
-          </div>
-        </header>
-      )}
+          >
+            Turud
+          </button>
+          <button type="button" className={topTab === 'ai' ? 'active' : ''} onClick={() => setTopTab('ai')}>
+            Analüütik
+          </button>
+        </nav>
+        <div className="topnav-user">
+          <span className="topnav-user-name">{displayName}</span>
+          <button type="button" className="topnav-signout" onClick={() => signOut()}>
+            Välju
+          </button>
+        </div>
+      </header>
 
-      {topTab !== 'ai' && (
-        <div className="market-tape" aria-label="Aktsiate tõusud ja langused">
+      <div className="market-tape" aria-label="Aktsiate tõusud ja langused">
           <div className="market-tape-track">
             {(marketTape.length ? [...marketTape, ...marketTape] : [{ symbol: '…', price: null, changePercent: 0 }]).map(
               (t, i) => {
@@ -847,15 +852,82 @@ export default function StocksApp() {
             )}
           </div>
         </div>
-      )}
 
       <div className="stocks-page">
+        {topTab === 'desk' && (
+          <div className="desk-home">
+            <div className="desk-hero">
+              <h1>Täna: kas hind on mõistlik?</h1>
+              <p>
+                Kirjuta sümbol või küsimus. Analüütik arvutab P/E, PEG, õiglase hinna ja
+                võrdleb Grahami, Lynchi ja Buffetti filtritega — mitte jutumulliga.
+              </p>
+            </div>
+            <form
+              className="desk-ask"
+              onSubmit={(e) => {
+                e.preventDefault();
+                askAnalyst(deskAsk || 'Analüüsi AAPL');
+              }}
+            >
+              <input
+                value={deskAsk}
+                onChange={(e) => setDeskAsk(e.target.value)}
+                placeholder="Analüüsi NVDA — kas P/E on mõistlik?"
+              />
+              <button type="submit">Arvuta</button>
+            </form>
+            <div className="desk-chips">
+              {['Analüüsi AMD', 'Analüüsi NVDA', 'Kas VOO on mõistlik tuum?', 'Võrdle QQQ vs SMH'].map((c) => (
+                <button key={c} type="button" className="desk-chip" onClick={() => askAnalyst(c)}>
+                  {c}
+                </button>
+              ))}
+            </div>
+            <div className="desk-grid">
+              <div className="desk-card">
+                <h3>Sinu raamat</h3>
+                <div className="desk-names">
+                  {(list.length ? list : DEFAULT_SYMBOLS.map((s) => ({ id: s, symbol: s }))).slice(0, 6).map((row) => {
+                    const q = quotes[row.symbol];
+                    const isUp = (q?.changePercent || 0) >= 0;
+                    return (
+                      <button
+                        key={row.id}
+                        type="button"
+                        className="desk-name"
+                        onClick={() => {
+                          setTopTab('watchlist');
+                          openSymbol(row.symbol, q?.name || '');
+                        }}
+                      >
+                        <b>{row.symbol}</b>
+                        <span className={isUp ? 'up' : 'down'}>{fmtPct(q?.changePercent)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="desk-card">
+                <h3>Kuidas desk mõtleb</h3>
+                <p className="muted">
+                  Graham: P/E ≤ 15 ja P/E×P/B ≤ 22.5. Lynch: PEG ≤ 1 on kasv odavalt.
+                  Buffett: earnings yield (1/P/E) peab konkureerima võlakirjaga, kui moat on nõrk.
+                </p>
+                <button type="button" className="analyze-btn" onClick={() => setTopTab('watchlist')}>
+                  Ava raamat →
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {topTab === 'watchlist' && (
           <div className="watchlist-full">
             <div className="wl-head">
               <div>
-                <div className="side-kicker">Yahoo Finance</div>
-                <h1>My Watchlist</h1>
+                <div className="side-kicker">Raamat</div>
+                <h1>Jälgimisnimekiri</h1>
               </div>
               <button
                 type="button"
@@ -921,7 +993,7 @@ export default function StocksApp() {
             <div className="wl-list">{watchlistRows}</div>
 
             <div className="wl-foot">
-              <span>Yahoo Finance</span>
+              <span>Desk</span>
               <span className="dot">·</span>
               <span>{chart?.marketState === 'REGULAR' ? 'Market Open' : 'Market Closed'}</span>
             </div>
@@ -1069,6 +1141,13 @@ export default function StocksApp() {
                           Lihtsustatud mudel (P/E, PEG, P/B, dividend, 52W) + Graham/Lynch/Buffett filtrid — ei ole ostu- ega müügisoovitus.
                           {v.confidence === 'low' ? ' Andmeid napib; skoor on vähem usaldusväärne.' : ''}
                         </p>
+                        <button
+                          type="button"
+                          className="analyze-btn"
+                          onClick={() => askAnalyst(`Analüüsi ${selected} — näita P/E, PEG, õiglast hinda ja Graham/Lynch/Buffett filtreid.`)}
+                        >
+                          Täispikk analüütiku memo
+                        </button>
                       </>
                     );
                   })()}
@@ -1283,8 +1362,10 @@ export default function StocksApp() {
 
         {topTab === 'ai' && userId && (
           <ClaudeChat
-            key={userId}
-            onBack={() => setTopTab('watchlist')}
+            key={`${userId}-${analystSeed || 'idle'}`}
+            embedded
+            seedPrompt={analystSeed}
+            onBack={() => setTopTab('desk')}
             context={{
               headlines: (hotNews.length ? hotNews : symbolNews).slice(0, 6).map((n) => n.title),
               gainers: trends.filter((t) => t.kind === 'up').map((t) => ({ symbol: t.symbol, changePercent: 0 })),

@@ -3,12 +3,12 @@
 export default function Nav({ active }) {
   return (
     <div className="nav">
-      <a href="/" className="nav-brand">Investor AI</a>
+      <a href="/" className="nav-brand">Desk</a>
       <a href="/" className={active === 'markets' || active === 'watchlist' ? 'active' : ''}>
-        My Watchlist
+        Raamat
       </a>
-      <a href="/#trends" className={active === 'trends' ? 'active' : ''}>Trendid</a>
-      <a href="/ai" className={active === 'ai' ? 'active' : ''}>AI vestlus</a>
+      <a href="/#trends" className={active === 'trends' ? 'active' : ''}>Turud</a>
+      <a href="/" className={active === 'ai' ? 'active' : ''}>Analüütik</a>
     </div>
   );
 }

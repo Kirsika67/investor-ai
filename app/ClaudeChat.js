@@ -239,7 +239,7 @@ function IconMenu() {
   );
 }
 
-export default function ClaudeChat({ context, onBack }) {
+export default function ClaudeChat({ context, onBack, seedPrompt, embedded }) {
   const { user, displayName, avatarLetter, isPro, signOut } = useAuth();
   const userId = user?.id;
 
@@ -251,7 +251,7 @@ export default function ClaudeChat({ context, onBack }) {
   const [hydrated, setHydrated] = useState(false);
   const [sideCollapsed, setSideCollapsed] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [productTab, setProductTab] = useState('chat'); // chat | cowork | code
+  const [productTab, setProductTab] = useState('chat');
   const [sideView, setSideView] = useState('chats'); // chats | projects | artifacts | customize
   const [model, setModel] = useState(MODELS[0]);
   const [modelOpen, setModelOpen] = useState(false);
@@ -273,6 +273,8 @@ export default function ClaudeChat({ context, onBack }) {
   const useWhisperRef = useRef(false);
   const persistTimerRef = useRef(null);
   const knownChatIdsRef = useRef(new Set());
+  const seedSentRef = useRef(false);
+  const pendingSeedRef = useRef('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -838,6 +840,30 @@ export default function ClaudeChat({ context, onBack }) {
     setTimeout(() => inputRef.current?.focus(), 30);
   }
 
+  useEffect(() => {
+    if (!hydrated || seedSentRef.current) return;
+    const seed = String(seedPrompt || '').trim();
+    if (!seed) return;
+    seedSentRef.current = 'pending';
+    pendingSeedRef.current = seed;
+    const id = uid();
+    setChats((prev) => [
+      { id, title: titleFromMessages([{ role: 'user', content: seed }]), messages: [], updatedAt: Date.now(), pinned: false },
+      ...prev,
+    ]);
+    setActiveId(id);
+    setSideView('chats');
+  }, [hydrated, seedPrompt]);
+
+  useEffect(() => {
+    if (seedSentRef.current !== 'pending' || !active || busy) return;
+    const seed = pendingSeedRef.current;
+    if (!seed || active.messages.length) return;
+    seedSentRef.current = true;
+    requestReply([{ role: 'user', content: seed }]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated, activeId, busy]);
+
   async function send() {
     const text = input.trim();
     if (!text || busy || !active) return;
@@ -949,32 +975,17 @@ export default function ClaudeChat({ context, onBack }) {
               <IconMenu />
             </button>
           )}
-          <div className="claude-brand">
-            <span className="claude-brand-mark">Investor AI</span>
-            <span className="claude-brand-sub">Research</span>
-          </div>
-          <nav className="claude-product-tabs">
-            <button
-              type="button"
-              className={productTab === 'chat' ? 'active' : ''}
-              onClick={() => {
-                setProductTab('chat');
-                setSideView('chats');
-              }}
-            >
-              Vestlus
-            </button>
-            <button type="button" className={productTab === 'cowork' ? 'active' : ''} onClick={() => setProductTab('cowork')}>
-              Tööruum
-            </button>
-            <button type="button" className={productTab === 'code' ? 'active' : ''} onClick={() => setProductTab('code')}>
-              Tööriistad
-            </button>
-          </nav>
+          {!embedded && (
+            <div className="claude-brand">
+              <span className="claude-brand-mark">Desk</span>
+              <span className="claude-brand-sub">Analüütik</span>
+            </div>
+          )}
+          {embedded && <span className="claude-brand-sub">Analüütik</span>}
         </div>
-        {onBack && (
+        {onBack && !embedded && (
           <button type="button" className="claude-top-back" onClick={onBack}>
-            ← Markets
+            ← Desk
           </button>
         )}
       </header>
@@ -1147,27 +1158,6 @@ export default function ClaudeChat({ context, onBack }) {
         )}
 
         <main className="claude-main">
-          {productTab === 'cowork' && (
-            <div className="claude-mode-page">
-              <h2>Tööruum</h2>
-              <p>Hoia analüüside kaustu ja märkmeid Investor AI-s — eraldi vestlustest.</p>
-              <button type="button" className="claude-inline-btn" onClick={() => setSideView('projects')}>
-                Ava kaustad
-              </button>
-            </div>
-          )}
-
-          {productTab === 'code' && (
-            <div className="claude-mode-page">
-              <h2>Tööriistad</h2>
-              <p>Küsi valuatsiooni, P/E/PEG arvutusi või portfelli loogikat. Ava Vestlus, et alustada.</p>
-              <button type="button" className="claude-inline-btn" onClick={() => setProductTab('chat')}>
-                Mine vestlusse
-              </button>
-            </div>
-          )}
-
-          {productTab === 'chat' && (
             <>
               <div className="claude-thread">
                 {active.messages.length === 0 && !busy && (
@@ -1175,8 +1165,25 @@ export default function ClaudeChat({ context, onBack }) {
                     <div className="claude-asterisk" aria-hidden>
                       IA
                     </div>
-                    <h2>Mis aktsiat analüüsime?</h2>
-                    <p className="claude-empty-hint">Nt „Analüüsi AMD” — arvutan P/E, PEG ja õiglase hinna.</p>
+                    <h2>Mis aktsiat arvutame?</h2>
+                    <p className="claude-empty-hint">
+                      Nt „Analüüsi AMD” — P/E, PEG, õiglane hind, Graham / Lynch / Buffett.
+                    </p>
+                    <div className="desk-chips" style={{ justifyContent: 'center', marginTop: 18 }}>
+                      {['Analüüsi AMD', 'Analüüsi AAPL', 'Analüüsi SMH'].map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          className="desk-chip"
+                          onClick={() => {
+                            if (busy || !active) return;
+                            requestReply([...active.messages, { role: 'user', content: c }]);
+                          }}
+                        >
+                          {c}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -1364,7 +1371,6 @@ export default function ClaudeChat({ context, onBack }) {
                 <div className="claude-disclaimer">Investor AI arvutab valuatsiooni; see ei ole isiklik soovitus. Kontrolli numbreid.</div>
               </div>
             </>
-          )}
         </main>
       </div>
     </div>
