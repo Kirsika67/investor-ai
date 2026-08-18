@@ -47,18 +47,45 @@ function fmtPct(n) {
   return `${sign}${Number(n).toFixed(2)}%`;
 }
 
-function trendWhy(kind, changePercent) {
+function trendWhy(section, changePercent) {
   const pct = fmtPct(changePercent);
-  if (kind === 'up') {
-    return `Päeva tipptõusjate seas (${pct}). Kuum, sest momentum toob raha ja pealkirju — ava, et näha mis liikumist toidab.`;
+  if (section === 'growth') {
+    return `Growth-tech nimekirjas (${pct}). Kasv on kõrge — ava, et arvutada kas P/E ja PEG on mõistlikud, mitte ainult kas hind liigub.`;
   }
-  if (kind === 'down') {
-    return `Päeva suurimate langejate seas (${pct}). Kuum risk/võimalus — ava uudised ja analüüs, enne kui reageerid.`;
+  if (section === 'value') {
+    return `Undervalued-growth nimekirjas (${pct}). Turg hindab kasvu odavamalt — ava P/E, PEG ja õiglane hind.`;
   }
-  if (kind === 'active') {
-    return `Tänase kõige aktiivsemate seas (${pct}). Suur maht tähendab, et turg on selles nimes fookuses.`;
+  if (section === 'smallcap') {
+    return `Small-cap tõusjate seas (${pct}). Väiksemad nimed liiguvad teravamalt — ava risk ja katalüsaator.`;
+  }
+  if (section === 'shorted') {
+    return `Enim shortitud nimekirjas (${pct}). Palju vastaspositsioone — squeeze või fundamentaalne nõrkus. Ava enne kui reageerid.`;
+  }
+  if (section === 'up') {
+    return `Päeva tipptõusjate seas (${pct}). Momentum toob raha ja pealkirju — ava, mis liikumist toidab.`;
+  }
+  if (section === 'down') {
+    return `Päeva suurimate langejate seas (${pct}). Risk või võimalus — ava uudised ja valuatsioon enne otsust.`;
+  }
+  if (section === 'active') {
+    return `Tänase kõige aktiivsemate seas (${pct}). Suur maht = turg on selles nimes fookuses.`;
   }
   return 'Uudistes esile kerkinud teema — ava, et lugeda miks see tähelepanu saab.';
+}
+
+function trendKicker(section) {
+  return (
+    {
+      growth: 'Growth tech',
+      value: 'Undervalued growth',
+      smallcap: 'Small cap',
+      shorted: 'Most shorted',
+      up: 'Päeva tõusja',
+      down: 'Päeva langeja',
+      active: 'Kõige aktiivsem',
+      news: 'Uudistes',
+    }[section] || 'Turg'
+  );
 }
 
 function renderSimpleMd(text) {
@@ -526,7 +553,7 @@ export default function StocksApp() {
                   : customKind === 'down'
                     ? `↓ ${m.symbol} ${fmtPct(m.changePercent)}`
                     : `${m.symbol} · ${fmtPct(m.changePercent)}`,
-              why: trendWhy(customKind, m.changePercent),
+              why: trendWhy(trendType, m.changePercent),
             }))
           );
         }
@@ -1248,23 +1275,38 @@ export default function StocksApp() {
                     <section key={sec.kind} className="trend-section">
                       <h4 className="trend-section-title">{sec.title}</h4>
                       <div className="trend-section-list">
-                        {sec.items.map((t) => (
+                        {sec.items.map((t) => {
+                          const isUp = (t.changePercent || 0) >= 0;
+                          return (
                           <button
                             key={t.id}
                             type="button"
-                            className={`trend-card ${t.kind}`}
+                            className="trend-card"
                             onClick={() => openTrendDetail(t)}
                           >
                             <div className="trend-card-top">
-                              <span className="trend-card-title">{t.text}</span>
-                              {t.price != null && (
-                                <span className="trend-card-price mono">${fmtPrice(t.price)}</span>
-                              )}
+                              <div className="trend-card-left">
+                                <span className="trend-card-sym">{t.symbol || t.text}</span>
+                                {t.name && t.symbol && (
+                                  <span className="trend-card-name">{t.name}</span>
+                                )}
+                              </div>
+                              <div className="trend-card-right">
+                                {t.changePercent != null && (
+                                  <span className={`trend-card-pct mono ${isUp ? 'up' : 'down'}`}>
+                                    {fmtPct(t.changePercent)}
+                                  </span>
+                                )}
+                                {t.price != null && (
+                                  <span className="trend-card-price mono">${fmtPrice(t.price)}</span>
+                                )}
+                              </div>
                             </div>
                             {t.why && <p className="trend-card-why">{t.why}</p>}
                             <span className="trend-card-cta">Ava analüüs →</span>
                           </button>
-                        ))}
+                          );
+                        })}
                       </div>
                     </section>
                   ))}
@@ -1285,15 +1327,7 @@ export default function StocksApp() {
 
                 <div className="trend-detail-head">
                   <div>
-                    <div className="side-kicker">
-                      {trendDetail.kind === 'up'
-                        ? 'Päeva tõusja'
-                        : trendDetail.kind === 'down'
-                          ? 'Päeva langeja'
-                          : trendDetail.kind === 'active'
-                            ? 'Kõige aktiivsem'
-                            : 'Uudistes'}
-                    </div>
+                    <div className="side-kicker">{trendKicker(trendDetail.section || trendDetail.kind)}</div>
                     <h2>
                       {trendDetail.symbol}
                       {trendDetail.name ? ` · ${trendDetail.name}` : ''}

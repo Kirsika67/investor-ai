@@ -1133,29 +1133,49 @@ button, input {
 
 .trend-card-top {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
 }
 
-.trend-card-title {
-  flex: 1;
+.trend-card-left {
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trend-card-sym {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.trend-card-name {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trend-card-right {
+  flex-shrink: 0;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.trend-card-pct {
   font-size: 15px;
-  font-weight: 600;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  word-break: break-word;
+  font-weight: 700;
 }
-
-.trend-card.up .trend-card-title { color: var(--gain); }
-.trend-card.down .trend-card-title { color: var(--loss); }
-.trend-card.active .trend-card-title { color: var(--blue); }
 
 .trend-card-price {
-  flex-shrink: 0;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--muted);
 }
 
