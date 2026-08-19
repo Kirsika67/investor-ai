@@ -164,12 +164,13 @@ Sa EI ole Claude ega ChatGPT kloon. Stiil: selge, numbriline, veidi terav, nagu 
 
 REEGLID:
 1. See on JÄTKUV VESTLUS. Kasuta kogu eelnevat sõnumilugu.
-2. Vasta TÄPSELT kasutaja küsimusele. Kui ta ütleb “Analüüsi AMD”, anna kohe täispikk valuatsiooniarvutus — ära küsi enne horisonti.
+2. Vasta TÄPSELT kasutaja küsimusele. Kui ta ütleb “Analüüsi AMD”, anna kohe täispikk valuatsiooniarvutus. Kui ta küsib üldist investeerimisküsimust (nt "kas alustada", "kuidas hajutada", "mis on ETF"), vasta SELLELE — ära sunni sümbolit peale.
 3. Ära korda küsimust. Ära kasuta malle ega „Sinu küsimus:”.
 4. Ole aus; ära anna kindlat osta/müü käsku, aga anna SELGE hinnang: odavam / õiglane / kallim + miks.
 5. Ära leiuta hindu ega kordajaid. Kasuta ainult ARVUTATUD VALUATSIOON plokis olevaid numbreid.
 6. Too sisse tippinvestorite loogika (nimeliselt): Benjamin Graham (P/E, P/B, margin of safety), Peter Lynch (PEG), Warren Buffett (earnings yield / kvaliteet).
-7. Fookusevihje (ainult kui aitab): ${focus}.${market}${val}
+7. Sa PEAD vastama KÕIKIDELE investeerimisega seotud küsimustele: alustamine, strateegiad, riskid, portfelli ülesehitus, ETF vs aktsia, dividendid, maksuteemad, psühholoogia jne.
+8. Fookusevihje (ainult kui aitab): ${focus}.${market}${val}
 
 PIKKUS JA STRUKTUUR (analüüs / kas investeerida):
 Kirjuta PIKK research-stiilis vastus (umbes 450–700 sõna), mitte 3–4 lauset.
@@ -618,11 +619,11 @@ function localReply({ messages, context, quotesBySym, valuationBySym }) {
   }
 
   if (/tervit|hei|tere|help|abi/.test(q.toLowerCase())) {
-    return 'Tere — olen Investor AI. Küsi nt „Analüüsi AMD” või „kas SMH on mõistlik?” — annan P/E, PEG ja Graham/Lynch/Buffett filtritega arvutuse.';
+    return 'Tere — olen Investor AI. Küsi aktsia kohta, turu kohta, investeerimise kohta — vastan kõigele.';
   }
 
-
-  return `Küsi sümbolit (nt „Analüüsi NVDA”) — arvutan P/E, PEG, õiglase hinna ja võrdlen Grahami / Lynchi / Buffetti loogikaga.`;
+  // No symbol, not a simple greeting — let OpenAI handle general investment questions
+  return null;
 }
 
 export async function POST(request) {
@@ -738,8 +739,8 @@ export async function POST(request) {
 
     const lastUserIntent = detectIntent(lastUser);
     const wantsValuation =
-      lastUserIntent === 'invest' ||
-      (symbols[0] && /analüüs|analyze|mõistlik|p\/e|peg|valuat/i.test(lastUser));
+      symbols[0] && (lastUserIntent === 'invest' ||
+      /analüüs|analyze|mõistlik|p\/e|peg|valuat/i.test(lastUser));
 
     let reply = null;
     let mode = 'local';
