@@ -769,7 +769,86 @@ export async function POST(request) {
     }
 
     if (!reply) {
-      reply = 'Küsi sümbolit (nt „Analüüsi NVDA") — arvutan P/E, PEG, õiglase hinna ja võrdlen Grahami / Lynchi / Buffetti loogikaga.';
+      const q = lastUser.toLowerCase();
+      if (/noor|alusta|algaja|esimene|kuidas alusta/.test(q)) {
+        reply = [
+          'Investeerimist pole kunagi liiga vara alustada — mida noorem, seda suurem liitintressi eelis.',
+          '',
+          '**Praktiline samm:**',
+          '1. Ava investeerimiskonto (nt LHV, Swedbank, Interactive Brokers)',
+          '2. Alusta laia indeksfondiga (nt S&P 500 ETF nagu VOO või VWCE)',
+          '3. Investeeri regulaarselt, nt iga kuu kindel summa',
+          '4. Ära proovi turgu ajastada — aeg turul > turu ajastamine',
+          '',
+          '**Miks noorena?** Kui investeerid 100€/kuus 7% tootlusega:',
+          '- Alates 20. eluaastast: ~400 000€ 65-aastaselt',
+          '- Alates 30. eluaastast: ~190 000€ 65-aastaselt',
+          '',
+          'Liitintress on võimas. Küsi edasi — räägime portfellist, riskist või konkreetsetest aktsiatest.',
+        ].join('\n');
+      } else if (/hajut|divers|portfel|jaot/.test(q)) {
+        reply = [
+          '**Hajutamine** on investeerimise alustala — ära pane kõiki mune ühte korvi.',
+          '',
+          '**Põhimõtted:**',
+          '1. **Varaklass:** aktsiad + võlakirjad + kinnisvara',
+          '2. **Geograafia:** USA + Euroopa + arenevad turud',
+          '3. **Sektor:** tech + tervishoid + finants + energia',
+          '4. **Suurus:** large cap + mid/small cap',
+          '',
+          '**Lihtne starter-portfell:**',
+          '- 70% VWCE (ülemaailmne aktsiad)',
+          '- 20% võlakirjad',
+          '- 10% üksikaktsiad (kui soovid)',
+          '',
+          'Küsi konkreetse aktsia kohta — arvutan, kas hind on mõistlik.',
+        ].join('\n');
+      } else if (/etf|fond|indeks/.test(q)) {
+        reply = [
+          '**ETF** (Exchange-Traded Fund) on börsil kaubeldav fond, mis jälgib indeksit, sektorit või strateegiat.',
+          '',
+          '**Miks ETF?**',
+          '- Automaatne hajutus (1 ost = sajad aktsiad)',
+          '- Madalad tasud (0.03–0.20% aastas)',
+          '- Lihtne osta nagu aktsiat',
+          '',
+          '**Populaarsed ETF-id:**',
+          '- **VOO** — S&P 500 (USA suurimad 500)',
+          '- **VWCE** — kogu maailma aktsiad',
+          '- **SMH** — pooljuhid (AI/chip sektor)',
+          '- **QQQ** — Nasdaq 100 (tech-kaldega)',
+          '',
+          'Küsi konkreetse sümboli kohta — arvutan valuatsiooni.',
+        ].join('\n');
+      } else if (/risk|ohtl|kaota|turval/.test(q)) {
+        reply = [
+          '**Investeerimisrisk** sõltub sellest, mida ja kuidas ostad.',
+          '',
+          '**Madalama riskiga:** lai indeksfond (VOO, VWCE) — ajalooliselt ~7-10% aastas, aga langeb ka 30-40% kriisis.',
+          '**Kõrgema riskiga:** üksikaktsiad, sektori-ETF-id (SMH), crypto.',
+          '**Kõrgeima riskiga:** optsioonid, leverage, meme-aktsiad.',
+          '',
+          '**Kuidas riski maandada:**',
+          '- Hajuta (mitte ainult tech)',
+          '- Investeeri pikalt (5+ aastat)',
+          '- Ära investeeri raha, mida lähiajal vajad',
+          '',
+          'Küsi konkreetse aktsia riski kohta — arvutan beta, volatiilsuse ja sektoripositsiooni.',
+        ].join('\n');
+      } else {
+        reply = [
+          'Olen Investor AI — küsi mis tahes investeerimisega seotud küsimus:',
+          '',
+          '• **Aktsia analüüs:** "Analüüsi NVDA" — P/E, PEG, õiglane hind',
+          '• **Alustamine:** "Kuidas alustada investeerimist?"',
+          '• **Portfell:** "Kuidas hajutada?"',
+          '• **ETF-id:** "Mis on ETF?"',
+          '• **Risk:** "Kui riskantne on TSLA?"',
+          '• **Võrdlus:** "NVDA vs AMD"',
+          '',
+          'Küsi julgelt!',
+        ].join('\n');
+      }
       mode = 'local';
     }
 
