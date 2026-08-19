@@ -217,7 +217,11 @@ async function callOpenAI({ system, messages }) {
   if (!res.ok) {
     throw new Error(data?.error?.message || 'OpenAI päring ebaõnnestus');
   }
-  return data.choices?.[0]?.message?.content || '';
+  const content = data.choices?.[0]?.message?.content || '';
+  if (!content) {
+    throw new Error('OpenAI tagastas tühja vastuse');
+  }
+  return content;
 }
 
 function priceLine(quote) {
@@ -759,6 +763,7 @@ export async function POST(request) {
         if (reply) mode = 'openai';
       } catch (e) {
         openaiError = e.message || 'OpenAI viga';
+        console.error('OpenAI error:', openaiError);
       }
     }
 
