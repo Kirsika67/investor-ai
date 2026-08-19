@@ -125,11 +125,13 @@ function detectIntent(q) {
 
 function isFollowUp(q) {
   const t = q.toLowerCase().trim();
+  // If the message contains a new symbol, it's NOT a follow-up — it's a topic change
+  if (extractSymbols(q).length) return false;
   if (t.length < 80 && /^(ja|aga|ok|okei|selge|jah|ei|miks|kuidas|millal|kas)\b/.test(t)) return true;
   if (/sellest|seda|selle|nende|temast|selles|eelmis|mainitud|üllal|ülemise|sama|lähemalt|rohkem|täpsusta|jätka|räägi (veel|lähemalt|rohkem)/.test(t)) {
     return true;
   }
-  if (t.split(/\s+/).length <= 6 && !extractSymbols(t).length) return true;
+  if (t.split(/\s+/).length <= 4 && !extractSymbols(t).length) return true;
   return false;
 }
 
@@ -558,17 +560,20 @@ function answerDeepen(sym, info, quote, prevSnippet, question) {
 function localReply({ messages, context, quotesBySym, valuationBySym }) {
   const last = [...messages].reverse().find((m) => m.role === 'user')?.content || '';
   const q = last.trim();
-  const followUp = isFollowUp(q);
-  const historySymbols = symbolsFromHistory(messages);
   const currentSymbols = extractSymbols(q);
-  const symbols = currentSymbols.length ? currentSymbols : historySymbols;
+  const topicChanged = currentSymbols.length > 0;
+  const followUp = !topicChanged && isFollowUp(q);
+  const historySymbols = symbolsFromHistory(messages);
+  // Only fall back to history symbols if this is a genuine follow-up question
+  const symbols = currentSymbols.length ? currentSymbols : (followUp ? historySymbols : []);
   const primary = symbols[0] || null;
   const info = primary ? KNOWN[primary] : null;
   const quote = primary ? quotesBySym[primary] : null;
   const valuationBundle = primary ? valuationBySym?.[primary] : null;
   let intent = detectIntent(q);
 
-  if (followUp && primary && (intent === 'general' || intent === 'deepen' || intent === 'explain')) {
+  // Only deepen if genuinely continuing same topic (no new symbol mentioned)
+  if (followUp && !topicChanged && primary && (intent === 'general' || intent === 'deepen' || intent === 'explain')) {
     intent = 'deepen';
   }
 
@@ -616,10 +621,6 @@ function localReply({ messages, context, quotesBySym, valuationBySym }) {
     return 'Tere — olen Investor AI. Küsi nt „Analüüsi AMD” või „kas SMH on mõistlik?” — annan P/E, PEG ja Graham/Lynch/Buffett filtritega arvutuse.';
   }
 
-  const prev = lastAssistantSnippet(messages);
-  if (prev) {
-    return `Sa ütlesid: “${q}”. Jään eelmise teema juurde — täpsusta: **risk**, **osakaal**, **võrdlus** või **valuatsioon (P/E)**?`;
-  }
 
   return `Küsi sümbolit (nt „Analüüsi NVDA”) — arvutan P/E, PEG, õiglase hinna ja võrdlen Grahami / Lynchi / Buffetti loogikaga.`;
 }
@@ -644,9 +645,13 @@ export async function POST(request) {
     }));
 
     const lastUser = [...normalized].reverse().find((m) => m.role === 'user')?.content || '';
-    const symbols = [
-      ...new Set([...extractSymbols(lastUser), ...symbolsFromHistory(normalized)]),
-    ].slice(0, 4);
+    const currentMentioned = extractSymbols(lastUser);
+    const isFollowUpMsg = !currentMentioned.length && isFollowUp(lastUser);
+    const symbols = currentMentioned.length
+      ? [...new Set([...currentMentioned, ...symbolsFromHistory(normalized)])].slice(0, 4)
+      : isFollowUpMsg
+        ? symbolsFromHistory(normalized).slice(0, 4)
+        : [];
 
     let quotesBySym = {};
     if (symbols.length) {
@@ -744,18 +749,27 @@ export async function POST(request) {
     if (wantsValuation && symbols[0]) {
       reply = localReply({ messages: normalized, context, quotesBySym, valuationBySym });
       mode = 'valuation';
-    } else {
+    }
+
+    // If local didn't produce a reply, always try OpenAI
+    if (!reply) {
       try {
         reply = await callOpenAI({ system, messages: normalized });
         if (reply) mode = 'openai';
       } catch (e) {
         openaiError = e.message || 'OpenAI viga';
       }
+    }
 
-      if (!reply || (symbols[0] && reply.length < 500 && /analüüs|amd|nvda|aapl|invest/i.test(lastUser))) {
-        reply = localReply({ messages: normalized, context, quotesBySym, valuationBySym });
-        mode = openaiError ? 'local_fallback' : 'local';
-      }
+    // Final fallback
+    if (!reply) {
+      reply = localReply({ messages: normalized, context, quotesBySym, valuationBySym });
+      mode = openaiError ? 'local_fallback' : 'local';
+    }
+
+    if (!reply) {
+      reply = 'Küsi sümbolit (nt „Analüüsi NVDA") — arvutan P/E, PEG, õiglase hinna ja võrdlen Grahami / Lynchi / Buffetti loogikaga.';
+      mode = 'local';
     }
 
     return NextResponse.json({

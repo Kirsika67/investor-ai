@@ -1078,7 +1078,7 @@ export default function ClaudeChat({ context, onBack, seedPrompt, embedded }) {
                 <div className="claude-panel-block">
                   <div className="claude-side-label">Seaded</div>
                   <p className="claude-side-empty">
-                    Teemat ei pea ette valima — kirjuta nt „Analüüsi AMD”. AI arvutab P/E ja tippinvestorite filtrid.
+                    Kirjuta mis tahes küsimus — aktsia analüüs, turg, uudised, risk. AI vastab täpselt sellele, mida küsid.
                   </p>
                 </div>
               )}
@@ -1167,10 +1167,10 @@ export default function ClaudeChat({ context, onBack, seedPrompt, embedded }) {
                     </div>
                     <h2>Mis aktsiat arvutame?</h2>
                     <p className="claude-empty-hint">
-                      Nt „Analüüsi AMD” — P/E, PEG, õiglane hind, Graham / Lynch / Buffett.
+                      Küsi aktsia kohta, turu ülevaadet, uudiseid või riskianalüüsi.
                     </p>
                     <div className="desk-chips" style={{ justifyContent: 'center', marginTop: 18 }}>
-                      {['Analüüsi AMD', 'Analüüsi AAPL', 'Analüüsi SMH'].map((c) => (
+                      {['Analüüsi NVDA', 'Tänane turg', 'Kas AAPL on kallis?'].map((c) => (
                         <button
                           key={c}
                           type="button"
@@ -1298,7 +1298,7 @@ export default function ClaudeChat({ context, onBack, seedPrompt, embedded }) {
                     ref={inputRef}
                     value={input}
                     rows={1}
-                    placeholder="Analüüsi AMD…"
+                    placeholder="Küsi midagi…"
                     onChange={(e) => {
                       setInput(e.target.value);
                       const el = e.target;
