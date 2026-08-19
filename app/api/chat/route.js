@@ -125,13 +125,16 @@ function detectIntent(q) {
 
 function isFollowUp(q) {
   const t = q.toLowerCase().trim();
-  // If the message contains a new symbol, it's NOT a follow-up — it's a topic change
   if (extractSymbols(q).length) return false;
-  if (t.length < 80 && /^(ja|aga|ok|okei|selge|jah|ei|miks|kuidas|millal|kas)\b/.test(t)) return true;
-  if (/sellest|seda|selle|nende|temast|selles|eelmis|mainitud|üllal|ülemise|sama|lähemalt|rohkem|täpsusta|jätka|räägi (veel|lähemalt|rohkem)/.test(t)) {
+  // Must reference investing/finance context to be a follow-up
+  const financeWords = /aktsia|fond|etf|invest|portfel|hind|turg|ost|müü|dividend|risk|tootlus|valuats|p\/e|peg|anal|börs|sektor|crypto|krüpto/;
+  if (/sellest|seda|selle|eelmis|mainitud|sama|lähemalt|rohkem|täpsusta|jätka|räägi (veel|lähemalt|rohkem)/.test(t)) {
     return true;
   }
-  if (t.split(/\s+/).length <= 4 && !extractSymbols(t).length) return true;
+  // Short continuation words only if finance-related
+  if (t.length < 60 && /^(ja|aga|ok|okei|selge|jah|ei|miks|kuidas|millal)\b/.test(t) && financeWords.test(t)) return true;
+  // Very short generic follow-ups (2-3 words like "ja risk?" or "miks langeb?")
+  if (t.split(/\s+/).length <= 3 && /^(ja|aga|miks|kuidas)\b/.test(t)) return true;
   return false;
 }
 
